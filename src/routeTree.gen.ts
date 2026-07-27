@@ -11,6 +11,8 @@
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as AuthenticatedRouteRouteImport } from './routes/_authenticated/route'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as ApiTranscribeRouteImport } from './routes/api/transcribe'
+import { Route as ApiSpeakRouteImport } from './routes/api/speak'
 import { Route as AuthenticatedConversationsIndexRouteImport } from './routes/_authenticated/conversations.index'
 import { Route as AuthenticatedConversationsIdRouteImport } from './routes/_authenticated/conversations.$id'
 
@@ -21,6 +23,16 @@ const AuthenticatedRouteRoute = AuthenticatedRouteRouteImport.update({
 const IndexRoute = IndexRouteImport.update({
   id: '/',
   path: '/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiTranscribeRoute = ApiTranscribeRouteImport.update({
+  id: '/api/transcribe',
+  path: '/api/transcribe',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiSpeakRoute = ApiSpeakRouteImport.update({
+  id: '/api/speak',
+  path: '/api/speak',
   getParentRoute: () => rootRouteImport,
 } as any)
 const AuthenticatedConversationsIndexRoute =
@@ -38,11 +50,15 @@ const AuthenticatedConversationsIdRoute =
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
+  '/api/speak': typeof ApiSpeakRoute
+  '/api/transcribe': typeof ApiTranscribeRoute
   '/conversations/$id': typeof AuthenticatedConversationsIdRoute
   '/conversations/': typeof AuthenticatedConversationsIndexRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
+  '/api/speak': typeof ApiSpeakRoute
+  '/api/transcribe': typeof ApiTranscribeRoute
   '/conversations/$id': typeof AuthenticatedConversationsIdRoute
   '/conversations': typeof AuthenticatedConversationsIndexRoute
 }
@@ -50,18 +66,32 @@ export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/_authenticated': typeof AuthenticatedRouteRouteWithChildren
+  '/api/speak': typeof ApiSpeakRoute
+  '/api/transcribe': typeof ApiTranscribeRoute
   '/_authenticated/conversations/$id': typeof AuthenticatedConversationsIdRoute
   '/_authenticated/conversations/': typeof AuthenticatedConversationsIndexRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/conversations/$id' | '/conversations/'
+  fullPaths:
+    | '/'
+    | '/api/speak'
+    | '/api/transcribe'
+    | '/conversations/$id'
+    | '/conversations/'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/conversations/$id' | '/conversations'
+  to:
+    | '/'
+    | '/api/speak'
+    | '/api/transcribe'
+    | '/conversations/$id'
+    | '/conversations'
   id:
     | '__root__'
     | '/'
     | '/_authenticated'
+    | '/api/speak'
+    | '/api/transcribe'
     | '/_authenticated/conversations/$id'
     | '/_authenticated/conversations/'
   fileRoutesById: FileRoutesById
@@ -69,6 +99,8 @@ export interface FileRouteTypes {
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   AuthenticatedRouteRoute: typeof AuthenticatedRouteRouteWithChildren
+  ApiSpeakRoute: typeof ApiSpeakRoute
+  ApiTranscribeRoute: typeof ApiTranscribeRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -85,6 +117,20 @@ declare module '@tanstack/react-router' {
       path: '/'
       fullPath: '/'
       preLoaderRoute: typeof IndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/transcribe': {
+      id: '/api/transcribe'
+      path: '/api/transcribe'
+      fullPath: '/api/transcribe'
+      preLoaderRoute: typeof ApiTranscribeRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/speak': {
+      id: '/api/speak'
+      path: '/api/speak'
+      fullPath: '/api/speak'
+      preLoaderRoute: typeof ApiSpeakRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/_authenticated/conversations/': {
@@ -120,17 +166,9 @@ const AuthenticatedRouteRouteWithChildren =
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   AuthenticatedRouteRoute: AuthenticatedRouteRouteWithChildren,
+  ApiSpeakRoute: ApiSpeakRoute,
+  ApiTranscribeRoute: ApiTranscribeRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
   ._addFileTypes<FileRouteTypes>()
-
-import type { getRouter } from './router.tsx'
-import type { startInstance } from './start.ts'
-declare module '@tanstack/react-start' {
-  interface Register {
-    ssr: true
-    router: Awaited<ReturnType<typeof getRouter>>
-    config: Awaited<ReturnType<typeof startInstance.getOptions>>
-  }
-}
