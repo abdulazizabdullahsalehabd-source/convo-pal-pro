@@ -10,7 +10,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 
-export const Route = createFileRoute("/_authenticated/conversations")({
+export const Route = createFileRoute("/_authenticated/conversations/")({
   head: () => ({ meta: [{ title: "محادثاتي — صديق المحادثة" }] }),
   component: ConversationsList,
 });
