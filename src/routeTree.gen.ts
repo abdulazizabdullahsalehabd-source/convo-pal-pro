@@ -11,6 +11,7 @@
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as AuthenticatedRouteRouteImport } from './routes/_authenticated/route'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as ApiTranscribeRouteImport } from './routes/api/transcribe'
 import { Route as AuthenticatedConversationsIndexRouteImport } from './routes/_authenticated/conversations.index'
 import { Route as AuthenticatedConversationsIdRouteImport } from './routes/_authenticated/conversations.$id'
 
@@ -21,6 +22,11 @@ const AuthenticatedRouteRoute = AuthenticatedRouteRouteImport.update({
 const IndexRoute = IndexRouteImport.update({
   id: '/',
   path: '/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiTranscribeRoute = ApiTranscribeRouteImport.update({
+  id: '/api/transcribe',
+  path: '/api/transcribe',
   getParentRoute: () => rootRouteImport,
 } as any)
 const AuthenticatedConversationsIndexRoute =
@@ -38,11 +44,13 @@ const AuthenticatedConversationsIdRoute =
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
+  '/api/transcribe': typeof ApiTranscribeRoute
   '/conversations/$id': typeof AuthenticatedConversationsIdRoute
   '/conversations/': typeof AuthenticatedConversationsIndexRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
+  '/api/transcribe': typeof ApiTranscribeRoute
   '/conversations/$id': typeof AuthenticatedConversationsIdRoute
   '/conversations': typeof AuthenticatedConversationsIndexRoute
 }
@@ -50,18 +58,20 @@ export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/_authenticated': typeof AuthenticatedRouteRouteWithChildren
+  '/api/transcribe': typeof ApiTranscribeRoute
   '/_authenticated/conversations/$id': typeof AuthenticatedConversationsIdRoute
   '/_authenticated/conversations/': typeof AuthenticatedConversationsIndexRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/conversations/$id' | '/conversations/'
+  fullPaths: '/' | '/api/transcribe' | '/conversations/$id' | '/conversations/'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/conversations/$id' | '/conversations'
+  to: '/' | '/api/transcribe' | '/conversations/$id' | '/conversations'
   id:
     | '__root__'
     | '/'
     | '/_authenticated'
+    | '/api/transcribe'
     | '/_authenticated/conversations/$id'
     | '/_authenticated/conversations/'
   fileRoutesById: FileRoutesById
@@ -69,6 +79,7 @@ export interface FileRouteTypes {
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   AuthenticatedRouteRoute: typeof AuthenticatedRouteRouteWithChildren
+  ApiTranscribeRoute: typeof ApiTranscribeRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -85,6 +96,13 @@ declare module '@tanstack/react-router' {
       path: '/'
       fullPath: '/'
       preLoaderRoute: typeof IndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/transcribe': {
+      id: '/api/transcribe'
+      path: '/api/transcribe'
+      fullPath: '/api/transcribe'
+      preLoaderRoute: typeof ApiTranscribeRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/_authenticated/conversations/': {
@@ -120,6 +138,7 @@ const AuthenticatedRouteRouteWithChildren =
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   AuthenticatedRouteRoute: AuthenticatedRouteRouteWithChildren,
+  ApiTranscribeRoute: ApiTranscribeRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
