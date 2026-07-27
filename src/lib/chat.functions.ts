@@ -98,7 +98,6 @@ export const sendMessage = createServerFn({ method: "POST" })
       .limit(20);
 
     const messages = [
-      { role: "system" as const, content: SYSTEM_PROMPT },
       ...(history ?? []).map((m) => ({
         role: m.role as "user" | "assistant",
         content: m.content,
@@ -114,6 +113,7 @@ export const sendMessage = createServerFn({ method: "POST" })
     try {
       const { output } = await generateText({
         model,
+        system: SYSTEM_PROMPT,
         messages,
         output: Output.object({ schema: ReplySchema }),
       });
