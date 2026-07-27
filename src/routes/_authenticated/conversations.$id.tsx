@@ -1,11 +1,11 @@
-import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
+import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
-import { ArrowRight, Mic, Send, Volume2, Sparkles, Languages } from "lucide-react";
+import { ArrowRight, Mic, Send, Square, Volume2, Sparkles } from "lucide-react";
 import { listMessages, sendMessage } from "@/lib/chat.functions";
-import { useSpeechRecognition, speak } from "@/hooks/use-speech";
+import { useVoiceRecorder, speak, stopSpeaking } from "@/hooks/use-speech";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
@@ -31,7 +31,6 @@ function ChatScreen() {
   const qc = useQueryClient();
   const [text, setText] = useState("");
   const scrollRef = useRef<HTMLDivElement>(null);
-  const speech = useSpeechRecognition();
 
   const { data: messages, isLoading } = useQuery({
     queryKey: ["messages", id],
@@ -51,6 +50,7 @@ function ChatScreen() {
     const t = raw.trim();
     if (!t || sendMut.isPending) return;
     setText("");
+    stopSpeaking();
     // Optimistically append user message locally
     qc.setQueryData<Msg[]>(["messages", id], (old) => [
       ...(old ?? []),
@@ -66,18 +66,14 @@ function ChatScreen() {
     sendMut.mutate(t);
   };
 
+  const recorder = useVoiceRecorder((transcript) => submit(transcript));
+  useEffect(() => {
+    if (recorder.error) toast.error(recorder.error);
+  }, [recorder.error]);
+
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
-  }, [messages, sendMut.isPending]);
-
-  // When speech recognition ends with a transcript, send it
-  const lastTranscriptRef = useRef("");
-  useEffect(() => {
-    if (!speech.listening && speech.transcript && speech.transcript !== lastTranscriptRef.current) {
-      lastTranscriptRef.current = speech.transcript;
-      submit(speech.transcript);
-    }
-  }, [speech.listening, speech.transcript]);
+  }, [messages, sendMut.isPending, recorder.status]);
 
   // Auto-play the assistant's latest reply
   const lastSpokenRef = useRef<string | null>(null);
@@ -103,14 +99,6 @@ function ChatScreen() {
           <div className="font-semibold text-slate-900 text-sm">صديق المحادثة</div>
           <div className="text-[11px] text-slate-500">جاهز للتحدث بالإنجليزية أو العربية</div>
         </div>
-        <button
-          onClick={() => speech.setLang(speech.lang === "en-US" ? "ar-SA" : "en-US")}
-          className="flex items-center gap-1 text-xs bg-slate-100 hover:bg-slate-200 px-2.5 py-1.5 rounded-lg text-slate-700"
-          title="لغة التسجيل الصوتي"
-        >
-          <Languages className="w-3.5 h-3.5" />
-          {speech.lang === "en-US" ? "EN" : "AR"}
-        </button>
       </header>
 
       <div ref={scrollRef} className="flex-1 overflow-y-auto px-3 py-4 space-y-3">
@@ -122,7 +110,8 @@ function ChatScreen() {
           messages?.map((m) => <MessageBubble key={m.id} m={m} />)
         )}
         {sendMut.isPending && <TypingIndicator />}
-        {speech.listening && <ListeningIndicator text={speech.transcript} />}
+        {recorder.status === "recording" && <RecordingIndicator elapsed={recorder.elapsed} />}
+        {recorder.status === "transcribing" && <TranscribingIndicator />}
       </div>
 
       <footer className="bg-white border-t border-slate-200 px-3 py-3 pb-[calc(env(safe-area-inset-bottom)+12px)]">
@@ -139,24 +128,25 @@ function ChatScreen() {
             placeholder="اكتب أو استخدم الميكروفون..."
             rows={1}
             dir="auto"
+            disabled={recorder.status !== "idle"}
             className="flex-1 resize-none bg-slate-100 rounded-2xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-sky-400 max-h-32"
           />
           {text.trim() ? (
             <Button
               onClick={() => submit(text)}
-              disabled={sendMut.isPending}
+              disabled={sendMut.isPending || recorder.status !== "idle"}
               size="icon"
               className="w-11 h-11 rounded-full bg-sky-500 hover:bg-sky-600 shrink-0"
             >
               <Send className="w-5 h-5" />
             </Button>
           ) : (
-            <MicButton speech={speech} disabled={sendMut.isPending} />
+            <MicButton recorder={recorder} disabled={sendMut.isPending} />
           )}
         </div>
-        {!speech.supported && (
+        {!recorder.supported && (
           <p className="text-[11px] text-slate-400 mt-2 text-center">
-            التسجيل الصوتي غير مدعوم في هذا المتصفح — استخدم Chrome على أندرويد أو الكتابة.
+            التسجيل الصوتي غير مدعوم في هذا المتصفح — استخدم متصفحاً حديثاً أو اكتب رسالتك.
           </p>
         )}
       </footer>
@@ -164,30 +154,37 @@ function ChatScreen() {
   );
 }
 
-function MicButton({ speech, disabled }: { speech: ReturnType<typeof useSpeechRecognition>; disabled: boolean }) {
-  const onDown = () => { if (!disabled && speech.supported) speech.start(); };
-  const onUp = () => speech.stop();
+function MicButton({
+  recorder,
+  disabled,
+}: {
+  recorder: ReturnType<typeof useVoiceRecorder>;
+  disabled: boolean;
+}) {
+  const isRecording = recorder.status === "recording";
+  const isBusy = recorder.status === "transcribing";
   return (
     <button
-      disabled={disabled || !speech.supported}
-      onMouseDown={onDown}
-      onMouseUp={onUp}
-      onMouseLeave={() => speech.listening && onUp()}
-      onTouchStart={(e) => { e.preventDefault(); onDown(); }}
-      onTouchEnd={(e) => { e.preventDefault(); onUp(); }}
+      type="button"
+      disabled={disabled || !recorder.supported || isBusy}
+      onClick={() => recorder.toggle()}
       className={cn(
         "w-14 h-14 rounded-full shrink-0 flex items-center justify-center text-white transition-all relative",
-        speech.listening
+        isRecording
           ? "bg-rose-500 scale-110 shadow-lg shadow-rose-300"
           : "bg-gradient-to-br from-sky-500 to-emerald-500 shadow-lg shadow-sky-200",
-        disabled && "opacity-50",
+        (disabled || isBusy) && "opacity-60",
       )}
-      aria-label="اضغط مطولاً للتسجيل"
+      aria-label={isRecording ? "اضغط لإيقاف التسجيل" : "اضغط لبدء التسجيل"}
     >
-      {speech.listening && (
+      {isRecording && (
         <span className="absolute inset-0 rounded-full bg-rose-400 animate-ping opacity-60" />
       )}
-      <Mic className="w-6 h-6 relative z-10" />
+      {isRecording ? (
+        <Square className="w-5 h-5 relative z-10 fill-white" />
+      ) : (
+        <Mic className="w-6 h-6 relative z-10" />
+      )}
     </button>
   );
 }
@@ -251,12 +248,33 @@ function TypingIndicator() {
   );
 }
 
-function ListeningIndicator({ text }: { text: string }) {
+function RecordingIndicator({ elapsed }: { elapsed: number }) {
+  const mm = String(Math.floor(elapsed / 60)).padStart(2, "0");
+  const ss = String(elapsed % 60).padStart(2, "0");
   return (
     <div className="flex items-center justify-end gap-2">
-      <span className="text-xs text-rose-600 font-medium">يستمع...</span>
-      <div className="bg-rose-50 border border-rose-200 rounded-2xl rounded-br-md px-4 py-2.5 text-sm text-slate-700 max-w-[85%]" dir="auto">
-        {text || "..."}
+      <span className="text-xs text-rose-600 font-medium">يسجّل... {mm}:{ss}</span>
+      <div className="bg-rose-50 border border-rose-200 rounded-2xl rounded-br-md px-4 py-2.5 flex items-center gap-1">
+        {[0, 1, 2, 3, 4].map((i) => (
+          <span
+            key={i}
+            className="w-1 bg-rose-500 rounded-full animate-pulse"
+            style={{ height: `${8 + (i % 3) * 6}px`, animationDelay: `${i * 120}ms` }}
+          />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function TranscribingIndicator() {
+  return (
+    <div className="flex items-center justify-end gap-2">
+      <span className="text-xs text-sky-600 font-medium">يحوّل الصوت إلى نص...</span>
+      <div className="bg-sky-50 border border-sky-200 rounded-2xl rounded-br-md px-4 py-2.5 flex items-center gap-1">
+        <span className="w-2 h-2 bg-sky-500 rounded-full animate-bounce" style={{ animationDelay: "0ms" }} />
+        <span className="w-2 h-2 bg-sky-500 rounded-full animate-bounce" style={{ animationDelay: "150ms" }} />
+        <span className="w-2 h-2 bg-sky-500 rounded-full animate-bounce" style={{ animationDelay: "300ms" }} />
       </div>
     </div>
   );
