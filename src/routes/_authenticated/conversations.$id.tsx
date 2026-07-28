@@ -25,7 +25,16 @@ const VOICES: { id: string; label: string; gender: "male" | "female" }[] = [
 const VOICE_KEY = "cf-voice";
 
 export const Route = createFileRoute("/_authenticated/conversations/$id")({
-  head: () => ({ meta: [{ title: "محادثة — صديق المحادثة" }] }),
+  head: () => ({
+    meta: [
+      { title: "محادثة — صديق المحادثة" },
+      { name: "description", content: "تدرّب صوتياً ونصياً مع صديق المحادثة واحصل على ردود وتصحيحات واضحة." },
+      { property: "og:title", content: "محادثة — صديق المحادثة" },
+      { property: "og:description", content: "واجهة محادثة صوتية ونصية لتطوير الإنجليزية بالعربية والإنجليزية." },
+      { property: "og:type", content: "website" },
+      { name: "twitter:card", content: "summary_large_image" },
+    ],
+  }),
   component: ChatScreen,
 });
 

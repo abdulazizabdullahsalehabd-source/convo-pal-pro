@@ -247,9 +247,7 @@ export async function speak(text: string, lang: "en" | "ar", voice?: string) {
   }
   if (!res.ok || !res.body) return;
 
-  const provider = res.headers.get("X-TTS-Provider") ?? (lang === "ar" ? "gemini" : "openai");
-  // OpenAI gpt-4o-mini-tts PCM = 24kHz mono s16le.
-  // Gemini-TTS PCM = 24kHz mono s16le as well (per Gemini live/tts spec).
+  // Gemini-TTS PCM = 24kHz mono s16le.
   const sampleRate = 24000;
   const AC: typeof AudioContext =
     (window as any).AudioContext || (window as any).webkitAudioContext;

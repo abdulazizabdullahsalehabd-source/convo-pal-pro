@@ -3,14 +3,14 @@ import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { z } from "zod";
 import { detectLanguage, generateAssistantReply } from "./chat-ai.server";
 
-const InputSchema = z.object({
-  conversationId: z.string().uuid(),
-  userText: z.string().min(1).max(2000),
-});
-
 export const sendMessage = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((input: unknown) => InputSchema.parse(input))
+  .inputValidator((input: unknown) =>
+    z.object({
+      conversationId: z.string().uuid(),
+      userText: z.string().min(1).max(2000),
+    }).parse(input),
+  )
   .handler(async ({ data, context }) => {
     const { supabase, userId } = context;
 
