@@ -14,16 +14,27 @@ const VOICES: { id: string; label: string; gender: "male" | "female" }[] = [
   { id: "Aoede", label: "أويدي — أنثى هادئة", gender: "female" },
   { id: "Leda", label: "ليدا — أنثى شابة", gender: "female" },
   { id: "Callirrhoe", label: "كاليروي — أنثى واثقة", gender: "female" },
+  { id: "Autonoe", label: "أوتونوي — أنثى ناعمة", gender: "female" },
   { id: "Puck", label: "باك — ذكر مرح", gender: "male" },
   { id: "Charon", label: "كارون — ذكر عميق", gender: "male" },
   { id: "Fenrir", label: "فينرير — ذكر قوي", gender: "male" },
   { id: "Orus", label: "أوروس — ذكر واضح", gender: "male" },
-  { id: "Zephyr", label: "زفير — ذكر خفيف", gender: "male" },
+  { id: "Enceladus", label: "إنسيلادوس — ذكر هادئ", gender: "male" },
+  { id: "Iapetus", label: "إيابيتوس — ذكر ثابت", gender: "male" },
 ];
 const VOICE_KEY = "cf-voice";
 
 export const Route = createFileRoute("/_authenticated/conversations/$id")({
-  head: () => ({ meta: [{ title: "محادثة — صديق المحادثة" }] }),
+  head: () => ({
+    meta: [
+      { title: "محادثة — صديق المحادثة" },
+      { name: "description", content: "تدرّب صوتياً ونصياً مع صديق المحادثة واحصل على ردود وتصحيحات واضحة." },
+      { property: "og:title", content: "محادثة — صديق المحادثة" },
+      { property: "og:description", content: "واجهة محادثة صوتية ونصية لتطوير الإنجليزية بالعربية والإنجليزية." },
+      { property: "og:type", content: "website" },
+      { name: "twitter:card", content: "summary_large_image" },
+    ],
+  }),
   component: ChatScreen,
 });
 
@@ -328,7 +339,7 @@ function EmptyChat() {
       </div>
       <h3 className="font-bold text-slate-800 mb-2">ابدأ محادثتك</h3>
       <p className="text-sm text-slate-500 max-w-xs mx-auto">
-        اضغط زر الميكروفون مطوّلاً وتحدّث بالإنجليزية، أو اكتب رسالتك. سأرد عليك وأصحح أخطاءك بلطف.
+        اضغط زر الميكروفون مرة للبدء ومرة للإيقاف، أو اكتب رسالتك. سأرد عليك وأصحح أخطاءك بلطف.
       </p>
     </div>
   );

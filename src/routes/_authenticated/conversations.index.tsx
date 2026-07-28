@@ -11,7 +11,16 @@ import { Input } from "@/components/ui/input";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 
 export const Route = createFileRoute("/_authenticated/conversations/")({
-  head: () => ({ meta: [{ title: "محادثاتي — صديق المحادثة" }] }),
+  head: () => ({
+    meta: [
+      { title: "محادثاتي — صديق المحادثة" },
+      { name: "description", content: "قائمة محادثاتك المحفوظة في تطبيق صديق المحادثة." },
+      { property: "og:title", content: "محادثاتي — صديق المحادثة" },
+      { property: "og:description", content: "تابع محادثاتك السابقة وابدأ تدريباً جديداً على الإنجليزية." },
+      { property: "og:type", content: "website" },
+      { name: "twitter:card", content: "summary_large_image" },
+    ],
+  }),
   component: ConversationsList,
 });
 

@@ -5,7 +5,7 @@ type SpeakBody = { text?: string; lang?: "ar" | "en"; voice?: string };
 // Curated Gemini prebuilt voices (support both Arabic and English).
 const VOICES = new Set([
   "Kore", "Aoede", "Leda", "Callirrhoe", "Autonoe", "Despina", // female
-  "Puck", "Charon", "Fenrir", "Orus", "Zephyr", "Achird",       // male
+  "Puck", "Charon", "Fenrir", "Orus", "Enceladus", "Iapetus", // male
 ]);
 
 // Strip emoji, symbols, and decoration so TTS reads only actual words.

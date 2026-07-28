@@ -7,6 +7,16 @@ import { toast } from "sonner";
 import { MessageCircleHeart, Mic, Sparkles } from "lucide-react";
 
 export const Route = createFileRoute("/")({
+  head: () => ({
+    meta: [
+      { title: "صديق المحادثة — تطبيق محادثة إنجليزية" },
+      { name: "description", content: "تدرّب على التحدث بالإنجليزية عبر محادثات صوتية ونصية ذكية مع تصحيح فوري." },
+      { property: "og:title", content: "صديق المحادثة — تطبيق محادثة إنجليزية" },
+      { property: "og:description", content: "محادثة صوتية ونصية لتطوير الإنجليزية مع ردود واضحة وتصحيح لطيف." },
+      { property: "og:type", content: "website" },
+      { name: "twitter:card", content: "summary_large_image" },
+    ],
+  }),
   component: Landing,
 });
 
