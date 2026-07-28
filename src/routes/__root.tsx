@@ -82,7 +82,6 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
       { name: "theme-color", content: "#0ea5e9" },
       { title: "صديق المحادثة — تدرّب على الإنجليزية" },
       { name: "description", content: "طبّق الإنجليزية عبر محادثة صوتية ونصية ذكية مع تصحيح فوري لأخطائك." },
-      { name: "author", content: "Abdulaziz Abd" },
       { property: "og:title", content: "صديق المحادثة" },
       { property: "og:description", content: "تدرّب على التحدث بالإنجليزية مع صديق ذكاء اصطناعي." },
       { property: "og:type", content: "website" },
