@@ -1,23 +1,74 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
-// ---------- Recording (MediaRecorder → /api/transcribe) ----------
+// ---------- Recording (Web Audio PCM → WAV → /api/transcribe) ----------
 
 type RecStatus = "idle" | "recording" | "transcribing";
 
-function pickMimeType(): string {
-  if (typeof MediaRecorder === "undefined") return "";
-  const candidates = [
-    "audio/webm;codecs=opus",
-    "audio/webm",
-    "audio/mp4",
-    "audio/ogg;codecs=opus",
-  ];
-  for (const t of candidates) {
-    try {
-      if (MediaRecorder.isTypeSupported(t)) return t;
-    } catch {}
+function getAudioContextClass() {
+  if (typeof window === "undefined") return null;
+  return window.AudioContext || (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext || null;
+}
+
+function concatPcm(chunks: Float32Array[]) {
+  const length = chunks.reduce((sum, chunk) => sum + chunk.length, 0);
+  const out = new Float32Array(length);
+  let offset = 0;
+  for (const chunk of chunks) {
+    out.set(chunk, offset);
+    offset += chunk.length;
   }
-  return "";
+  return out;
+}
+
+function downsamplePcm(input: Float32Array, inputRate: number, outputRate: number) {
+  if (outputRate === inputRate) return input;
+  const ratio = inputRate / outputRate;
+  const outputLength = Math.max(1, Math.round(input.length / ratio));
+  const output = new Float32Array(outputLength);
+  for (let i = 0; i < outputLength; i++) {
+    const start = Math.floor(i * ratio);
+    const end = Math.min(input.length, Math.floor((i + 1) * ratio));
+    let sum = 0;
+    let count = 0;
+    for (let j = start; j < end; j++) {
+      sum += input[j];
+      count++;
+    }
+    output[i] = count ? sum / count : input[start] ?? 0;
+  }
+  return output;
+}
+
+function encodeWav(chunks: Float32Array[], inputRate: number) {
+  const sampleRate = 16000;
+  const pcm = downsamplePcm(concatPcm(chunks), inputRate, sampleRate);
+  const buffer = new ArrayBuffer(44 + pcm.length * 2);
+  const view = new DataView(buffer);
+  const writeString = (offset: number, value: string) => {
+    for (let i = 0; i < value.length; i++) view.setUint8(offset + i, value.charCodeAt(i));
+  };
+
+  writeString(0, "RIFF");
+  view.setUint32(4, 36 + pcm.length * 2, true);
+  writeString(8, "WAVE");
+  writeString(12, "fmt ");
+  view.setUint32(16, 16, true);
+  view.setUint16(20, 1, true);
+  view.setUint16(22, 1, true);
+  view.setUint32(24, sampleRate, true);
+  view.setUint32(28, sampleRate * 2, true);
+  view.setUint16(32, 2, true);
+  view.setUint16(34, 16, true);
+  writeString(36, "data");
+  view.setUint32(40, pcm.length * 2, true);
+
+  let offset = 44;
+  for (let i = 0; i < pcm.length; i++) {
+    const sample = Math.max(-1, Math.min(1, pcm[i]));
+    view.setInt16(offset, sample < 0 ? sample * 0x8000 : sample * 0x7fff, true);
+    offset += 2;
+  }
+  return new Blob([buffer], { type: "audio/wav" });
 }
 
 export function useVoiceRecorder(onTranscript: (text: string) => void) {
@@ -26,8 +77,10 @@ export function useVoiceRecorder(onTranscript: (text: string) => void) {
   const [elapsed, setElapsed] = useState(0);
   const [error, setError] = useState<string | null>(null);
 
-  const mediaRef = useRef<MediaRecorder | null>(null);
-  const chunksRef = useRef<Blob[]>([]);
+  const audioCtxRef = useRef<AudioContext | null>(null);
+  const sourceRef = useRef<MediaStreamAudioSourceNode | null>(null);
+  const processorRef = useRef<ScriptProcessorNode | null>(null);
+  const pcmRef = useRef<Float32Array[]>([]);
   const streamRef = useRef<MediaStream | null>(null);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const startedAtRef = useRef<number>(0);
@@ -35,14 +88,22 @@ export function useVoiceRecorder(onTranscript: (text: string) => void) {
   useEffect(() => {
     if (typeof window === "undefined") return;
     setSupported(
-      typeof MediaRecorder !== "undefined" &&
-        !!navigator.mediaDevices?.getUserMedia,
+      !!getAudioContextClass() && !!navigator.mediaDevices?.getUserMedia,
     );
   }, []);
 
   const cleanupStream = () => {
+    try { processorRef.current?.disconnect(); } catch {}
+    try { sourceRef.current?.disconnect(); } catch {}
+    processorRef.current = null;
+    sourceRef.current = null;
     streamRef.current?.getTracks().forEach((t) => t.stop());
     streamRef.current = null;
+    const ctx = audioCtxRef.current;
+    audioCtxRef.current = null;
+    if (ctx && ctx.state !== "closed") {
+      try { void ctx.close(); } catch {}
+    }
     if (timerRef.current) {
       clearInterval(timerRef.current);
       timerRef.current = null;
@@ -53,54 +114,38 @@ export function useVoiceRecorder(onTranscript: (text: string) => void) {
     if (status !== "idle") return;
     setError(null);
     try {
+      const AudioContextClass = getAudioContextClass();
+      if (!AudioContextClass) throw new Error("unsupported");
       const stream = await navigator.mediaDevices.getUserMedia({
         audio: {
           echoCancellation: true,
           noiseSuppression: true,
           autoGainControl: true,
+          channelCount: 1,
         },
       });
       streamRef.current = stream;
-      const mimeType = pickMimeType();
-      const rec = mimeType ? new MediaRecorder(stream, { mimeType }) : new MediaRecorder(stream);
-      chunksRef.current = [];
-      rec.ondataavailable = (e) => {
-        if (e.data && e.data.size > 0) chunksRef.current.push(e.data);
+      const ctx = new AudioContextClass();
+      const source = ctx.createMediaStreamSource(stream);
+      const processor = ctx.createScriptProcessor(4096, 1, 1);
+      pcmRef.current = [];
+      processor.onaudioprocess = (event) => {
+        const input = event.inputBuffer.getChannelData(0);
+        pcmRef.current.push(new Float32Array(input));
       };
-      rec.onstop = async () => {
-        const type = rec.mimeType || mimeType || "audio/webm";
-        const blob = new Blob(chunksRef.current, { type });
-        cleanupStream();
-        if (blob.size < 1200) {
-          setStatus("idle");
-          setError("التسجيل قصير جداً — حاول مرة أخرى.");
-          return;
-        }
-        setStatus("transcribing");
-        try {
-          const form = new FormData();
-          form.append("file", blob, "recording");
-          const res = await fetch("/api/transcribe", { method: "POST", body: form });
-          if (!res.ok) {
-            const msg = await res.text().catch(() => "");
-            throw new Error(msg || `HTTP ${res.status}`);
-          }
-          const { text } = (await res.json()) as { text?: string };
-          if (text && text.trim()) onTranscript(text.trim());
-          else setError("لم أتمكن من فهم الصوت — حاول مجدداً.");
-        } catch (e) {
-          setError(e instanceof Error ? e.message : "فشل التحويل الصوتي");
-        } finally {
-          setStatus("idle");
-        }
-      };
-      rec.start();
-      mediaRef.current = rec;
+      source.connect(processor);
+      processor.connect(ctx.destination);
+      audioCtxRef.current = ctx;
+      sourceRef.current = source;
+      processorRef.current = processor;
       startedAtRef.current = Date.now();
       setElapsed(0);
       timerRef.current = setInterval(() => {
         setElapsed(Math.floor((Date.now() - startedAtRef.current) / 1000));
       }, 250);
+      if (ctx.state === "suspended") {
+        try { await ctx.resume(); } catch {}
+      }
       setStatus("recording");
     } catch (e) {
       cleanupStream();
@@ -113,15 +158,44 @@ export function useVoiceRecorder(onTranscript: (text: string) => void) {
     }
   }, [status, onTranscript]);
 
-  const stop = useCallback(() => {
-    const rec = mediaRef.current;
-    if (rec && rec.state !== "inactive") {
-      try { rec.stop(); } catch {}
-    } else {
+  const stop = useCallback(async () => {
+    if (status !== "recording") {
       cleanupStream();
       setStatus("idle");
+      return;
     }
-  }, []);
+
+    const ctx = audioCtxRef.current;
+    const inputRate = ctx?.sampleRate ?? 48000;
+    const chunks = [...pcmRef.current];
+    cleanupStream();
+
+    const duration = (Date.now() - startedAtRef.current) / 1000;
+    const blob = encodeWav(chunks, inputRate);
+    if (duration < 0.45 || blob.size < 2048) {
+      setStatus("idle");
+      setError("التسجيل قصير جداً — حاول مرة أخرى.");
+      return;
+    }
+
+    setStatus("transcribing");
+    try {
+      const form = new FormData();
+      form.append("file", blob, "recording.wav");
+      const res = await fetch("/api/transcribe", { method: "POST", body: form });
+      if (!res.ok) {
+        const msg = await res.text().catch(() => "");
+        throw new Error(msg || `HTTP ${res.status}`);
+      }
+      const { text } = (await res.json()) as { text?: string };
+      if (text && text.trim()) onTranscript(text.trim());
+      else setError("لم أتمكن من فهم الصوت — حاول مجدداً.");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "فشل التحويل الصوتي");
+    } finally {
+      setStatus("idle");
+    }
+  }, [status, onTranscript]);
 
   const toggle = useCallback(() => {
     if (status === "recording") stop();
