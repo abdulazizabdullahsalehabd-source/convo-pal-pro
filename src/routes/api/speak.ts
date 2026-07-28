@@ -1,6 +1,12 @@
 import { createFileRoute } from "@tanstack/react-router";
 
-type SpeakBody = { text?: string; lang?: "ar" | "en" };
+type SpeakBody = { text?: string; lang?: "ar" | "en"; voice?: string };
+
+// Curated Gemini prebuilt voices (support both Arabic and English).
+const VOICES = new Set([
+  "Kore", "Aoede", "Leda", "Callirrhoe", "Autonoe", "Despina", // female
+  "Puck", "Charon", "Fenrir", "Orus", "Zephyr", "Achird",       // male
+]);
 
 // Strip emoji, symbols, and decoration so TTS reads only actual words.
 function cleanForTTS(input: string): string {
@@ -24,34 +30,28 @@ export const Route = createFileRoute("/api/speak")({
         const key = process.env.LOVABLE_API_KEY;
         if (!key) return new Response("Missing LOVABLE_API_KEY", { status: 500 });
 
-        const { text, lang } = (await request.json()) as SpeakBody;
+        const { text, lang, voice } = (await request.json()) as SpeakBody;
         const clean = cleanForTTS(text ?? "");
         if (!clean) return new Response("Empty text", { status: 400 });
 
         const isArabic = lang === "ar";
+        const voiceName = voice && VOICES.has(voice) ? voice : "Kore";
+        const prompt = isArabic
+          ? `اقرأ النص التالي بلهجة عربية فصيحة واضحة وطبيعية وبنطق سليم: ${clean}`
+          : `Read the following text in clear, natural, friendly English: ${clean}`;
 
-        // Arabic: Gemini-TTS (natural Arabic pronunciation).
-        // English: OpenAI gpt-4o-mini-tts (natural English).
-        const body = isArabic
-          ? {
-              model: "google/gemini-2.5-flash-tts",
-              stream_format: "sse",
-              contents: [{ role: "user", parts: [{ text: `اقرأ النص التالي بلهجة عربية فصيحة واضحة وطبيعية: ${clean}` }] }],
-              generationConfig: {
-                responseModalities: ["AUDIO"],
-                speechConfig: {
-                  voiceConfig: { prebuiltVoiceConfig: { voiceName: "Kore" } },
-                },
-              },
-            }
-          : {
-              model: "openai/gpt-4o-mini-tts",
-              input: clean,
-              voice: "alloy",
-              stream_format: "sse",
-              response_format: "pcm",
-              instructions: "Speak clearly and naturally, at a friendly conversational pace.",
-            };
+        // Use Gemini TTS for BOTH Arabic and English — same voice catalog, consistent quality.
+        const body = {
+          model: "google/gemini-2.5-flash-tts",
+          stream_format: "sse",
+          contents: [{ role: "user", parts: [{ text: prompt }] }],
+          generationConfig: {
+            responseModalities: ["AUDIO"],
+            speechConfig: {
+              voiceConfig: { prebuiltVoiceConfig: { voiceName } },
+            },
+          },
+        };
 
         const res = await fetch("https://ai.gateway.lovable.dev/v1/audio/speech", {
           method: "POST",
@@ -71,7 +71,7 @@ export const Route = createFileRoute("/api/speak")({
           headers: {
             "Content-Type": "text/event-stream",
             "Cache-Control": "no-cache",
-            "X-TTS-Provider": isArabic ? "gemini" : "openai",
+            "X-TTS-Provider": "gemini",
           },
         });
       },
