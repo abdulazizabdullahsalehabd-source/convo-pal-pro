@@ -12,6 +12,12 @@ export const Route = createFileRoute("/api/transcribe")({
         if (!(file instanceof Blob)) {
           return new Response("Missing audio file", { status: 400 });
         }
+        if (file.size < 2048) {
+          return new Response("التسجيل فارغ أو قصير جداً — حاول مرة أخرى.", { status: 400 });
+        }
+        if (file.size > 25 * 1024 * 1024) {
+          return new Response("التسجيل طويل جداً — اجعله أقصر قليلاً.", { status: 413 });
+        }
 
         // Ensure the upload has a filename with a real extension the provider recognizes.
         const type = (file.type || "").split(";")[0];
@@ -25,11 +31,18 @@ export const Route = createFileRoute("/api/transcribe")({
           "audio/x-wav": "wav",
           "audio/wave": "wav",
         };
+        if (type && !extMap[type]) {
+          return new Response("صيغة الصوت غير مدعومة — حاول التسجيل من المتصفح مباشرة.", { status: 400 });
+        }
         const ext = extMap[type] ?? "webm";
 
         const upstream = new FormData();
         upstream.append("file", file, `recording.${ext}`);
         upstream.append("model", "openai/gpt-4o-mini-transcribe");
+        upstream.append(
+          "prompt",
+          "Transcribe the user's speech accurately. The user may speak English or Arabic. Preserve the spoken language, use correct spelling, and do not translate.",
+        );
 
         const res = await fetch("https://ai.gateway.lovable.dev/v1/audio/transcriptions", {
           method: "POST",
