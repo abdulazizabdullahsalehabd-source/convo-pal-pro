@@ -124,27 +124,45 @@ export const sendMessage = createServerFn({ method: "POST" })
     const key = process.env.LOVABLE_API_KEY;
     if (!key) throw new Error("Missing LOVABLE_API_KEY");
     const gateway = createLovableAiGatewayProvider(key);
-    const model = gateway("google/gemini-3.6-flash");
+
+    // Try a chain of free/high-throughput Gemini models. If one is rate-limited (429),
+    // fall back to the next so the user can keep chatting without hitting limits.
+    const modelChain = [
+      "google/gemini-3.1-flash-lite",
+      "google/gemini-3.6-flash",
+      "google/gemini-2.5-flash-lite",
+      "google/gemini-2.5-flash",
+    ];
 
     let parsed: z.infer<typeof ReplySchema> | null = null;
-    try {
-      const { output } = await generateText({
-        model,
-        system: SYSTEM_PROMPT,
-        messages,
-        output: Output.object({ schema: ReplySchema }),
-      });
-      parsed = output;
-    } catch (err) {
-      if (NoObjectGeneratedError.isInstance(err)) {
-        parsed = fallbackParse(err.text ?? "");
-      }
-      if (!parsed) {
+    let lastErr: unknown = null;
+    for (const modelId of modelChain) {
+      try {
+        const { output } = await generateText({
+          model: gateway(modelId),
+          system: SYSTEM_PROMPT,
+          messages,
+          output: Output.object({ schema: ReplySchema }),
+        });
+        parsed = output;
+        break;
+      } catch (err) {
+        lastErr = err;
+        if (NoObjectGeneratedError.isInstance(err)) {
+          const fb = fallbackParse(err.text ?? "");
+          if (fb) { parsed = fb; break; }
+        }
         const msg = err instanceof Error ? err.message : String(err);
-        if (msg.includes("429")) throw new Error("تم تجاوز عدد الطلبات المسموح مؤقتاً. حاول بعد قليل.");
-        if (msg.includes("402")) throw new Error("انتهى رصيد الذكاء الاصطناعي الشهري. تواصل مع المطور.");
-        throw new Error("تعذّر توليد الرد: " + msg);
+        // Retry only on rate-limit / transient upstream errors.
+        if (msg.includes("429") || msg.includes("503") || msg.includes("502")) continue;
+        break;
       }
+    }
+    if (!parsed) {
+      const msg = lastErr instanceof Error ? lastErr.message : String(lastErr);
+      if (msg.includes("429")) throw new Error("الخدمة مشغولة جداً الآن — حاول بعد ثوانٍ.");
+      if (msg.includes("402")) throw new Error("انتهى رصيد الذكاء الاصطناعي مؤقتاً — حاول لاحقاً.");
+      throw new Error("تعذّر توليد الرد. حاول مرة أخرى.");
     }
 
     // Insert assistant message
