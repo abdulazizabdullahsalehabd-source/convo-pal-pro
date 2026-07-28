@@ -9,6 +9,19 @@ import { useVoiceRecorder, speak, stopSpeaking } from "@/hooks/use-speech";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
+const VOICES: { id: string; label: string; gender: "male" | "female" }[] = [
+  { id: "Kore", label: "كور — أنثى دافئة", gender: "female" },
+  { id: "Aoede", label: "أويدي — أنثى هادئة", gender: "female" },
+  { id: "Leda", label: "ليدا — أنثى شابة", gender: "female" },
+  { id: "Callirrhoe", label: "كاليروي — أنثى واثقة", gender: "female" },
+  { id: "Puck", label: "باك — ذكر مرح", gender: "male" },
+  { id: "Charon", label: "كارون — ذكر عميق", gender: "male" },
+  { id: "Fenrir", label: "فينرير — ذكر قوي", gender: "male" },
+  { id: "Orus", label: "أوروس — ذكر واضح", gender: "male" },
+  { id: "Zephyr", label: "زفير — ذكر خفيف", gender: "male" },
+];
+const VOICE_KEY = "cf-voice";
+
 export const Route = createFileRoute("/_authenticated/conversations/$id")({
   head: () => ({ meta: [{ title: "محادثة — صديق المحادثة" }] }),
   component: ChatScreen,
@@ -31,6 +44,16 @@ function ChatScreen() {
   const qc = useQueryClient();
   const [text, setText] = useState("");
   const scrollRef = useRef<HTMLDivElement>(null);
+  const [voice, setVoice] = useState<string>("Kore");
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const v = localStorage.getItem(VOICE_KEY);
+    if (v && VOICES.some((x) => x.id === v)) setVoice(v);
+  }, []);
+  const changeVoice = (v: string) => {
+    setVoice(v);
+    try { localStorage.setItem(VOICE_KEY, v); } catch {}
+  };
 
   const { data: messages, isLoading } = useQuery({
     queryKey: ["messages", id],
@@ -82,9 +105,9 @@ function ChatScreen() {
     const last = messages[messages.length - 1];
     if (last.role === "assistant" && last.id !== lastSpokenRef.current) {
       lastSpokenRef.current = last.id;
-      speak(last.content, last.language === "ar" ? "ar" : "en");
+      speak(last.content, last.language === "ar" ? "ar" : "en", voice);
     }
-  }, [messages]);
+  }, [messages, voice]);
 
   return (
     <div className="flex flex-col h-dvh bg-slate-50">
@@ -99,6 +122,23 @@ function ChatScreen() {
           <div className="font-semibold text-slate-900 text-sm">صديق المحادثة</div>
           <div className="text-[11px] text-slate-500">جاهز للتحدث بالإنجليزية أو العربية</div>
         </div>
+        <select
+          value={voice}
+          onChange={(e) => changeVoice(e.target.value)}
+          className="text-[11px] bg-slate-100 border border-slate-200 rounded-lg px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-sky-400 max-w-[130px]"
+          aria-label="اختر الصوت"
+        >
+          <optgroup label="أصوات نسائية">
+            {VOICES.filter((v) => v.gender === "female").map((v) => (
+              <option key={v.id} value={v.id}>{v.label}</option>
+            ))}
+          </optgroup>
+          <optgroup label="أصوات رجالية">
+            {VOICES.filter((v) => v.gender === "male").map((v) => (
+              <option key={v.id} value={v.id}>{v.label}</option>
+            ))}
+          </optgroup>
+        </select>
       </header>
 
       <div ref={scrollRef} className="flex-1 overflow-y-auto px-3 py-4 space-y-3">
@@ -207,7 +247,7 @@ function MessageBubble({ m }: { m: Msg }) {
       </div>
       {!isUser && (
         <button
-          onClick={() => speak(m.content, isAr ? "ar" : "en")}
+          onClick={() => speak(m.content, isAr ? "ar" : "en", localStorage.getItem(VOICE_KEY) || "Kore")}
           className="flex items-center gap-1 text-[11px] text-slate-500 hover:text-sky-600 px-1"
         >
           <Volume2 className="w-3.5 h-3.5" />
