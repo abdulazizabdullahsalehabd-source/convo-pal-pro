@@ -152,7 +152,7 @@ function b64ToBytes(b64: string): Uint8Array {
   return out;
 }
 
-export async function speak(text: string, lang: "en" | "ar") {
+export async function speak(text: string, lang: "en" | "ar", voice?: string) {
   if (typeof window === "undefined") return;
   if (!text || !text.trim()) return;
   stopCurrentPlayback();
@@ -165,7 +165,7 @@ export async function speak(text: string, lang: "en" | "ar") {
     res = await fetch("/api/speak", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ text, lang }),
+      body: JSON.stringify({ text, lang, voice }),
       signal: abort.signal,
     });
   } catch {

@@ -81,7 +81,7 @@ function Landing() {
         </p>
       </div>
       <footer className="text-center text-xs text-slate-400 py-4">
-        صُنع بحب في اليمن 🇾🇪 — عبد العزيز عبد الله عَبَد
+        صديق المحادثة — تدرّب على الإنجليزية بثقة
       </footer>
     </div>
   );
