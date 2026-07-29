@@ -1,8 +1,10 @@
-name: Deploy React App to Pages
+name: Deploy Vite App to GitHub Pages
 
 on:
   push:
-    branches: ["main"] # إذا كان اسم الفرع الرئيسي لديك master قم بتغييره هنا
+    branches: 
+      - main
+      - master
 
 permissions:
   contents: read
@@ -34,12 +36,14 @@ jobs:
       - name: Build Project
         run: npm run build
 
+      - name: Setup Pages
+        uses: actions/configure-pages@v4
+
       - name: Upload Artifacts
         uses: actions/upload-pages-artifact@v3
         with:
-          path: './dist'
+          path: 'dist'
 
       - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v4
-
