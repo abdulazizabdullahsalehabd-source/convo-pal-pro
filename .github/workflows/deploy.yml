@@ -1,8 +1,8 @@
-name: Deploy Vite App to GitHub Pages
+name: Deploy Vite React App to GitHub Pages
 
 on:
   push:
-    branches: 
+    branches:
       - main
       - master
 
@@ -16,33 +16,51 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  deploy:
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
+  build-and-deploy:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout Code
+      - name: Checkout Repository
         uses: actions/checkout@v4
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 24
+          node-version: 20
 
       - name: Install Dependencies
-        run: npm install
+        run: |
+          if [ -f package-lock.json ]; then
+            npm ci
+          else
+            npm install
+          fi
 
       - name: Build Project
-        run: npm run build
+        run: |
+          npm run build
+
+      - name: Detect and Prepare Build Folder
+        run: |
+          if [ -d "dist" ]; then
+            echo "Found dist folder"
+            mkdir -p public_pages
+            cp -r dist/* public_pages/
+          elif [ -d "build" ]; then
+            echo "Found build folder"
+            mkdir -p public_pages
+            cp -r build/* public_pages/
+          else
+            echo "Error: No build folder found!"
+            exit 1
+          fi
 
       - name: Setup Pages
         uses: actions/configure-pages@v4
 
-      - name: Upload Artifacts
+      - name: Upload Artifact
         uses: actions/upload-pages-artifact@v3
         with:
-          path: 'build'
+          path: 'public_pages'
 
       - name: Deploy to GitHub Pages
         id: deployment
