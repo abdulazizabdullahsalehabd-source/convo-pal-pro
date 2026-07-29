@@ -3,7 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
-import { ArrowRight, Mic, Send, Square, Volume2, Sparkles } from "lucide-react";
+import { ArrowRight, Mic, Send, Square, Volume2, VolumeX, Sparkles } from "lucide-react";
 import { listMessages, sendMessage } from "@/lib/chat.functions";
 import { useVoiceRecorder, speak, stopSpeaking } from "@/hooks/use-speech";
 import { Button } from "@/components/ui/button";
@@ -23,6 +23,14 @@ const VOICES: { id: string; label: string; gender: "male" | "female" }[] = [
   { id: "Iapetus", label: "إيابيتوس — ذكر ثابت", gender: "male" },
 ];
 const VOICE_KEY = "cf-voice";
+const AUTO_SPEAK_KEY = "cf-auto-speak";
+
+function friendlyError(message: string) {
+  if (message.includes("402") || message.includes("payment_required") || message.includes("Not enough credits") || message.includes("رصيد")) {
+    return "نفد رصيد الذكاء الاصطناعي المجاني مؤقتاً. رسالتك محفوظة هنا؛ حاول لاحقاً أو أضف رصيداً من إعدادات Lovable.";
+  }
+  return message;
+}
 
 export const Route = createFileRoute("/_authenticated/conversations/$id")({
   head: () => ({
@@ -56,14 +64,31 @@ function ChatScreen() {
   const [text, setText] = useState("");
   const scrollRef = useRef<HTMLDivElement>(null);
   const [voice, setVoice] = useState<string>("Kore");
+  const [autoSpeak, setAutoSpeak] = useState(false);
+  const [playingAssistantKey, setPlayingAssistantKey] = useState<string | null>(null);
+  const [playingUserKey, setPlayingUserKey] = useState<string | null>(null);
+  const [audioNotes, setAudioNotes] = useState<Record<string, string>>({});
+  const userAudioRef = useRef<HTMLAudioElement | null>(null);
   useEffect(() => {
     if (typeof window === "undefined") return;
     const v = localStorage.getItem(VOICE_KEY);
     if (v && VOICES.some((x) => x.id === v)) setVoice(v);
+    setAutoSpeak(localStorage.getItem(AUTO_SPEAK_KEY) === "true");
   }, []);
   const changeVoice = (v: string) => {
     setVoice(v);
     try { localStorage.setItem(VOICE_KEY, v); } catch {}
+  };
+  const changeAutoSpeak = () => {
+    setAutoSpeak((current) => {
+      const next = !current;
+      try { localStorage.setItem(AUTO_SPEAK_KEY, String(next)); } catch {}
+      if (!next) {
+        stopSpeaking();
+        setPlayingAssistantKey(null);
+      }
+      return next;
+    });
   };
 
   const { data: messages, isLoading } = useQuery({
@@ -77,14 +102,26 @@ function ChatScreen() {
       qc.invalidateQueries({ queryKey: ["messages", id] });
       qc.invalidateQueries({ queryKey: ["conversations"] });
     },
-    onError: (e: Error) => toast.error(e.message),
+    onError: (e: Error, userText) => {
+      setText(userText);
+      toast.error(friendlyError(e.message));
+    },
   });
 
-  const submit = (raw: string) => {
+  const stopUserAudio = () => {
+    try { userAudioRef.current?.pause(); } catch {}
+    if (userAudioRef.current) userAudioRef.current.currentTime = 0;
+    userAudioRef.current = null;
+    setPlayingUserKey(null);
+  };
+
+  const submit = (raw: string, audioUrl?: string) => {
     const t = raw.trim();
     if (!t || sendMut.isPending) return;
     setText("");
     stopSpeaking();
+    stopUserAudio();
+    if (audioUrl) setAudioNotes((old) => ({ ...old, [t]: audioUrl }));
     // Optimistically append user message locally
     qc.setQueryData<Msg[]>(["messages", id], (old) => [
       ...(old ?? []),
@@ -94,13 +131,14 @@ function ChatScreen() {
         content: t,
         language: /[\u0600-\u06FF]/.test(t) ? "ar" : "en",
         correction: null,
+        audioUrl,
         created_at: new Date().toISOString(),
       },
     ]);
     sendMut.mutate(t);
   };
 
-  const recorder = useVoiceRecorder((transcript) => submit(transcript));
+  const recorder = useVoiceRecorder((transcript, audioUrl) => submit(transcript, audioUrl));
   useEffect(() => {
     if (recorder.error) toast.error(recorder.error);
   }, [recorder.error]);
@@ -112,13 +150,59 @@ function ChatScreen() {
   // Auto-play the assistant's latest reply
   const lastSpokenRef = useRef<string | null>(null);
   useEffect(() => {
+    if (!autoSpeak) return;
     if (!messages || messages.length === 0) return;
     const last = messages[messages.length - 1];
     if (last.role === "assistant" && last.id !== lastSpokenRef.current) {
       lastSpokenRef.current = last.id;
-      speak(last.content, last.language === "ar" ? "ar" : "en", voice);
+      stopUserAudio();
+      setPlayingAssistantKey(last.id);
+      speak(last.content, last.language === "ar" ? "ar" : "en", voice, () => {
+        setPlayingAssistantKey((current) => (current === last.id ? null : current));
+      }).catch((e: Error) => {
+        setPlayingAssistantKey(null);
+        toast.error(friendlyError(e.message));
+      });
     }
-  }, [messages, voice]);
+  }, [messages, voice, autoSpeak]);
+
+  const toggleAssistantAudio = (m: Msg) => {
+    if (playingAssistantKey === m.id) {
+      stopSpeaking();
+      setPlayingAssistantKey(null);
+      return;
+    }
+    stopUserAudio();
+    setPlayingAssistantKey(m.id);
+    speak(m.content, m.language === "ar" ? "ar" : "en", voice, () => {
+      setPlayingAssistantKey((current) => (current === m.id ? null : current));
+    }).catch((e: Error) => {
+      setPlayingAssistantKey(null);
+      toast.error(friendlyError(e.message));
+    });
+  };
+
+  const toggleUserAudio = (key: string, audioUrl: string) => {
+    if (playingUserKey === key) {
+      stopUserAudio();
+      return;
+    }
+    stopSpeaking();
+    setPlayingAssistantKey(null);
+    stopUserAudio();
+    const audio = new Audio(audioUrl);
+    userAudioRef.current = audio;
+    setPlayingUserKey(key);
+    audio.onended = () => setPlayingUserKey(null);
+    audio.onerror = () => {
+      setPlayingUserKey(null);
+      toast.error("تعذّر تشغيل التسجيل.");
+    };
+    audio.play().catch(() => {
+      setPlayingUserKey(null);
+      toast.error("تعذّر تشغيل التسجيل.");
+    });
+  };
 
   return (
     <div className="flex flex-col h-dvh bg-slate-50">
@@ -131,8 +215,19 @@ function ChatScreen() {
         </div>
         <div className="flex-1 min-w-0">
           <div className="font-semibold text-slate-900 text-sm">صديق المحادثة</div>
-          <div className="text-[11px] text-slate-500">جاهز للتحدث بالإنجليزية أو العربية</div>
+          <div className="text-[11px] text-slate-500">{autoSpeak ? "القراءة التلقائية مفعّلة" : "القراءة اليدوية توفّر الرصيد"}</div>
         </div>
+        <button
+          type="button"
+          onClick={changeAutoSpeak}
+          className={cn(
+            "w-9 h-9 rounded-lg flex items-center justify-center border transition-colors",
+            autoSpeak ? "bg-sky-50 border-sky-200 text-sky-600" : "bg-slate-100 border-slate-200 text-slate-500",
+          )}
+          aria-label={autoSpeak ? "إيقاف القراءة التلقائية" : "تشغيل القراءة التلقائية"}
+        >
+          {autoSpeak ? <Volume2 className="w-4 h-4" /> : <VolumeX className="w-4 h-4" />}
+        </button>
         <select
           value={voice}
           onChange={(e) => changeVoice(e.target.value)}
@@ -158,7 +253,17 @@ function ChatScreen() {
         ) : messages && messages.length === 0 ? (
           <EmptyChat />
         ) : (
-          messages?.map((m) => <MessageBubble key={m.id} m={m} />)
+          messages?.map((m) => (
+            <MessageBubble
+              key={m.id}
+              m={m}
+              audioUrl={m.audioUrl ?? audioNotes[m.content]}
+              assistantPlaying={playingAssistantKey === m.id}
+              userPlaying={playingUserKey === m.id}
+              onToggleAssistant={toggleAssistantAudio}
+              onToggleUser={toggleUserAudio}
+            />
+          ))
         )}
         {sendMut.isPending && <TypingIndicator />}
         {recorder.status === "recording" && <RecordingIndicator elapsed={recorder.elapsed} />}
@@ -241,6 +346,21 @@ function MicButton({
 }
 
 function MessageBubble({ m }: { m: Msg }) {
+function MessageBubble({
+  m,
+  audioUrl,
+  assistantPlaying,
+  userPlaying,
+  onToggleAssistant,
+  onToggleUser,
+}: {
+  m: Msg;
+  audioUrl?: string;
+  assistantPlaying: boolean;
+  userPlaying: boolean;
+  onToggleAssistant: (m: Msg) => void;
+  onToggleUser: (key: string, audioUrl: string) => void;
+}) {
   const isUser = m.role === "user";
   const isAr = m.language === "ar";
   return (
@@ -256,13 +376,22 @@ function MessageBubble({ m }: { m: Msg }) {
       >
         {m.content}
       </div>
-      {!isUser && (
+      {isUser && audioUrl && (
         <button
-          onClick={() => speak(m.content, isAr ? "ar" : "en", localStorage.getItem(VOICE_KEY) || "Kore")}
+          onClick={() => onToggleUser(m.id, audioUrl)}
           className="flex items-center gap-1 text-[11px] text-slate-500 hover:text-sky-600 px-1"
         >
-          <Volume2 className="w-3.5 h-3.5" />
-          استمع
+          {userPlaying ? <Square className="w-3.5 h-3.5 fill-current" /> : <Volume2 className="w-3.5 h-3.5" />}
+          {userPlaying ? "إيقاف تسجيلي" : "استمع لتسجيلي"}
+        </button>
+      )}
+      {!isUser && (
+        <button
+          onClick={() => onToggleAssistant(m)}
+          className="flex items-center gap-1 text-[11px] text-slate-500 hover:text-sky-600 px-1"
+        >
+          {assistantPlaying ? <Square className="w-3.5 h-3.5 fill-current" /> : <Volume2 className="w-3.5 h-3.5" />}
+          {assistantPlaying ? "إيقاف" : "استمع"}
         </button>
       )}
       {!isUser && m.correction && <CorrectionCard c={m.correction} />}

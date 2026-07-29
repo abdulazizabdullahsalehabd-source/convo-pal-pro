@@ -93,25 +93,23 @@ export async function generateAssistantReply({
   history: ChatHistoryMessage[];
   userLanguage: "ar" | "en";
 }) {
-  const gateway = createLovableAiGatewayProvider(apiKey);
-  const modelChain = [
-    "google/gemini-3.6-flash",
-    "google/gemini-3.5-flash",
-    "google/gemini-3.1-flash-lite",
-    "google/gemini-2.5-flash",
-  ];
+  const gateway = createLovableAiGatewayProvider(apiKey, { structuredOutputs: true });
+  const modelId = "openai/gpt-5.6-sol";
 
   let parsed: AssistantReply | null = null;
   let lastErr: unknown = null;
 
-  for (const modelId of modelChain) {
+  for (const attempt of [0, 1]) {
     try {
       const { output } = await generateText({
         model: gateway(modelId),
-        system: SYSTEM_PROMPT,
+        system:
+          attempt === 0
+            ? SYSTEM_PROMPT
+            : `${SYSTEM_PROMPT}\n\nIMPORTANT RETRY: Your previous draft was invalid, off-language, or repeated. Answer ONLY the latest user message with a fresh, direct reply.`,
         messages: history,
-        temperature: 0.35,
         output: Output.object({ schema: ReplySchema }),
+        providerOptions: { lovable: { reasoningEffort: "none" } },
       });
 
       if (output.reply_language !== userLanguage) {
@@ -144,7 +142,9 @@ export async function generateAssistantReply({
   if (!parsed) {
     const msg = lastErr instanceof Error ? lastErr.message : String(lastErr);
     if (msg.includes("429")) throw new Error("الخدمة مشغولة جداً الآن — حاول بعد ثوانٍ.");
-    if (msg.includes("402")) throw new Error("انتهى رصيد الذكاء الاصطناعي مؤقتاً — حاول لاحقاً.");
+    if (msg.includes("402") || msg.includes("payment_required") || msg.includes("Not enough credits")) {
+      throw new Error("نفد رصيد الذكاء الاصطناعي المجاني مؤقتاً. رسالتك لم تضِع؛ حاول لاحقاً أو أضف رصيداً من إعدادات Lovable.");
+    }
     throw new Error("تعذّر توليد الرد. حاول مرة أخرى.");
   }
 

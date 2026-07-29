@@ -71,7 +71,7 @@ function encodeWav(chunks: Float32Array[], inputRate: number) {
   return new Blob([buffer], { type: "audio/wav" });
 }
 
-export function useVoiceRecorder(onTranscript: (text: string) => void) {
+export function useVoiceRecorder(onTranscript: (text: string, audioUrl?: string) => void) {
   const [status, setStatus] = useState<RecStatus>("idle");
   const [supported, setSupported] = useState(true);
   const [elapsed, setElapsed] = useState(0);
@@ -172,7 +172,9 @@ export function useVoiceRecorder(onTranscript: (text: string) => void) {
 
     const duration = (Date.now() - startedAtRef.current) / 1000;
     const blob = encodeWav(chunks, inputRate);
+    const audioUrl = URL.createObjectURL(blob);
     if (duration < 0.45 || blob.size < 2048) {
+      URL.revokeObjectURL(audioUrl);
       setStatus("idle");
       setError("التسجيل قصير جداً — حاول مرة أخرى.");
       return;
@@ -188,7 +190,7 @@ export function useVoiceRecorder(onTranscript: (text: string) => void) {
         throw new Error(msg || `HTTP ${res.status}`);
       }
       const { text } = (await res.json()) as { text?: string };
-      if (text && text.trim()) onTranscript(text.trim());
+      if (text && text.trim()) onTranscript(text.trim(), audioUrl);
       else setError("لم أتمكن من فهم الصوت — حاول مجدداً.");
     } catch (e) {
       setError(e instanceof Error ? e.message : "فشل التحويل الصوتي");
@@ -211,8 +213,15 @@ export function useVoiceRecorder(onTranscript: (text: string) => void) {
 
 let currentAudioCtx: AudioContext | null = null;
 let currentAbort: AbortController | null = null;
+let currentDoneTimer: ReturnType<typeof setTimeout> | null = null;
+let currentPlaybackToken = 0;
 
 function stopCurrentPlayback() {
+  currentPlaybackToken++;
+  if (currentDoneTimer) {
+    clearTimeout(currentDoneTimer);
+    currentDoneTimer = null;
+  }
   try { currentAbort?.abort(); } catch {}
   currentAbort = null;
   try { currentAudioCtx?.close(); } catch {}
@@ -226,10 +235,18 @@ function b64ToBytes(b64: string): Uint8Array {
   return out;
 }
 
-export async function speak(text: string, lang: "en" | "ar", voice?: string) {
+function friendlyAudioError(status: number, message: string) {
+  if (status === 402 || message.includes("payment_required") || message.includes("Not enough credits")) {
+    return "نفد رصيد الصوت المجاني مؤقتاً — أوقف القراءة التلقائية أو حاول لاحقاً.";
+  }
+  return message || "تعذّر تشغيل الصوت.";
+}
+
+export async function speak(text: string, lang: "en" | "ar", voice?: string, onEnded?: () => void) {
   if (typeof window === "undefined") return;
   if (!text || !text.trim()) return;
   stopCurrentPlayback();
+  const token = ++currentPlaybackToken;
 
   const abort = new AbortController();
   currentAbort = abort;
@@ -245,7 +262,10 @@ export async function speak(text: string, lang: "en" | "ar", voice?: string) {
   } catch {
     return;
   }
-  if (!res.ok || !res.body) return;
+  if (!res.ok || !res.body) {
+    const msg = await res.text().catch(() => "");
+    throw new Error(friendlyAudioError(res.status, msg));
+  }
 
   // Gemini-TTS PCM = 24kHz mono s16le.
   const sampleRate = 24000;
@@ -286,6 +306,7 @@ export async function speak(text: string, lang: "en" | "ar", voice?: string) {
   const handleGeminiPayload = async (bytes: Uint8Array) => {
     // Detect RIFF/WAV header
     if (
+      token !== currentPlaybackToken ||
       bytes.length > 44 &&
       bytes[0] === 0x52 && bytes[1] === 0x49 && bytes[2] === 0x46 && bytes[3] === 0x46
     ) {
@@ -300,7 +321,7 @@ export async function speak(text: string, lang: "en" | "ar", voice?: string) {
         source.start(playhead);
         playhead += buf.duration;
       } catch {}
-    } else {
+    } else if (token === currentPlaybackToken) {
       scheduleChunk(bytes);
     }
   };
@@ -310,7 +331,7 @@ export async function speak(text: string, lang: "en" | "ar", voice?: string) {
   try {
     while (true) {
       const { value, done } = await reader.read();
-      if (done) break;
+      if (done || token !== currentPlaybackToken) break;
       buffer += value;
       let idx: number;
       // eslint-disable-next-line no-cond-assign
@@ -344,6 +365,17 @@ export async function speak(text: string, lang: "en" | "ar", voice?: string) {
   } catch {
     // aborted or network error
   }
+
+  if (token !== currentPlaybackToken) return;
+  const remaining = Math.max(0, playhead - ctx.currentTime + 0.25);
+  currentDoneTimer = setTimeout(() => {
+    if (token !== currentPlaybackToken) return;
+    try { ctx.close(); } catch {}
+    currentAudioCtx = null;
+    currentAbort = null;
+    currentDoneTimer = null;
+    onEnded?.();
+  }, Math.ceil(remaining * 1000));
 }
 
 export function stopSpeaking() {

@@ -52,6 +52,9 @@ export const Route = createFileRoute("/api/transcribe")({
 
         if (!res.ok) {
           const err = await res.text().catch(() => "");
+          if (res.status === 402 || err.includes("payment_required") || err.includes("Not enough credits")) {
+            return new Response("نفد رصيد تحويل الصوت إلى نص مؤقتاً — يمكنك الكتابة الآن أو المحاولة لاحقاً.", { status: 402 });
+          }
           return new Response(err || `Transcription failed: ${res.status}`, { status: res.status });
         }
 

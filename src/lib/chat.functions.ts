@@ -34,15 +34,16 @@ export const sendMessage = createServerFn({ method: "POST" })
     });
     if (insertUserErr) throw insertUserErr;
 
-    // Send the full ordered conversation so the model keeps context and never loops on stale early turns.
+    // Send only the newest turns to keep each AI request small, cheaper, and focused on the latest question.
     const { data: history } = await supabase
       .from("messages")
       .select("role, content")
       .eq("conversation_id", data.conversationId)
-      .order("created_at", { ascending: true });
+      .order("created_at", { ascending: false })
+      .limit(18);
 
     const messages = [
-      ...(history ?? []).map((m) => ({
+      ...(history ?? []).reverse().map((m) => ({
         role: m.role as "user" | "assistant",
         content: m.content,
       })),
