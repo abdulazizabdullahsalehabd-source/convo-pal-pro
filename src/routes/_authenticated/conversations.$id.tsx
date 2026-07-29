@@ -52,6 +52,7 @@ type Msg = {
   content: string;
   language: string;
   correction: null | { wrong: string; correct: string; hint: string };
+  audioUrl?: string;
   created_at: string;
 };
 
@@ -345,7 +346,6 @@ function MicButton({
   );
 }
 
-function MessageBubble({ m }: { m: Msg }) {
 function MessageBubble({
   m,
   audioUrl,
