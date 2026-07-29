@@ -263,8 +263,9 @@ export async function speak(text: string, lang: "en" | "ar", voice?: string, onE
       body: JSON.stringify({ text, lang, voice }),
       signal: abort.signal,
     });
-  } catch {
-    return;
+  } catch (e) {
+    if (abort.signal.aborted) return;
+    throw new Error(e instanceof Error ? e.message : "تعذّر تشغيل الصوت.");
   }
   if (!res.ok || !res.body) {
     const msg = await res.text().catch(() => "");
