@@ -191,8 +191,12 @@ export function useVoiceRecorder(onTranscript: (text: string, audioUrl?: string)
       }
       const { text } = (await res.json()) as { text?: string };
       if (text && text.trim()) onTranscript(text.trim(), audioUrl);
-      else setError("لم أتمكن من فهم الصوت — حاول مجدداً.");
+      else {
+        URL.revokeObjectURL(audioUrl);
+        setError("لم أتمكن من فهم الصوت — حاول مجدداً.");
+      }
     } catch (e) {
+      URL.revokeObjectURL(audioUrl);
       setError(e instanceof Error ? e.message : "فشل التحويل الصوتي");
     } finally {
       setStatus("idle");
