@@ -92,6 +92,14 @@ function ChatScreen() {
     });
   };
 
+  useEffect(() => {
+    return () => {
+      stopSpeaking();
+      try { userAudioRef.current?.pause(); } catch {}
+      Object.values(audioNotes).forEach((url) => URL.revokeObjectURL(url));
+    };
+  }, [audioNotes]);
+
   const { data: messages, isLoading } = useQuery({
     queryKey: ["messages", id],
     queryFn: () => listFn({ data: { conversationId: id } }) as Promise<Msg[]>,
