@@ -69,6 +69,7 @@ function ChatScreen() {
   const [playingAssistantKey, setPlayingAssistantKey] = useState<string | null>(null);
   const [playingUserKey, setPlayingUserKey] = useState<string | null>(null);
   const [audioNotes, setAudioNotes] = useState<Record<string, string>>({});
+  const audioNotesRef = useRef<Record<string, string>>({});
   const userAudioRef = useRef<HTMLAudioElement | null>(null);
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -93,12 +94,16 @@ function ChatScreen() {
   };
 
   useEffect(() => {
+    audioNotesRef.current = audioNotes;
+  }, [audioNotes]);
+
+  useEffect(() => {
     return () => {
       stopSpeaking();
       try { userAudioRef.current?.pause(); } catch {}
-      Object.values(audioNotes).forEach((url) => URL.revokeObjectURL(url));
+      Object.values(audioNotesRef.current).forEach((url) => URL.revokeObjectURL(url));
     };
-  }, [audioNotes]);
+  }, []);
 
   const { data: messages, isLoading } = useQuery({
     queryKey: ["messages", id],
