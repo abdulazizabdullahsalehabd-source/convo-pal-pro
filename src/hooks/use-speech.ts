@@ -304,9 +304,9 @@ export async function speak(text: string, lang: "en" | "ar", voice?: string, onE
 
   // Gemini returns entire audio (WAV) sometimes; handle both PCM stream and WAV.
   const handleGeminiPayload = async (bytes: Uint8Array) => {
+    if (token !== currentPlaybackToken) return;
     // Detect RIFF/WAV header
     if (
-      token !== currentPlaybackToken ||
       bytes.length > 44 &&
       bytes[0] === 0x52 && bytes[1] === 0x49 && bytes[2] === 0x46 && bytes[3] === 0x46
     ) {
@@ -321,7 +321,7 @@ export async function speak(text: string, lang: "en" | "ar", voice?: string, onE
         source.start(playhead);
         playhead += buf.duration;
       } catch {}
-    } else if (token === currentPlaybackToken) {
+    } else {
       scheduleChunk(bytes);
     }
   };
