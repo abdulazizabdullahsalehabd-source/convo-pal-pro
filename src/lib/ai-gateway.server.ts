@@ -14,3 +14,20 @@ export function createLovableAiGatewayProvider(
     },
   });
 }
+
+// Free, unlimited-friendly third-party providers (used when their keys exist).
+export function createGroqProvider(apiKey: string) {
+  return createOpenAICompatible({
+    name: "groq",
+    baseURL: "https://api.groq.com/openai/v1",
+    headers: { Authorization: `Bearer ${apiKey}` },
+  });
+}
+
+export function createOpenRouterProvider(apiKey: string) {
+  return createOpenAICompatible({
+    name: "openrouter",
+    baseURL: "https://openrouter.ai/api/v1",
+    headers: { Authorization: `Bearer ${apiKey}` },
+  });
+}
