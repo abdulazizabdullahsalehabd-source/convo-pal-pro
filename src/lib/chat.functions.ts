@@ -50,7 +50,6 @@ export const sendMessage = createServerFn({ method: "POST" })
     ];
 
     const key = process.env.LOVABLE_API_KEY;
-    if (!key) throw new Error("Missing LOVABLE_API_KEY");
     const parsed = await generateAssistantReply({ apiKey: key, history: messages, userLanguage: userLang });
 
     // Insert assistant message
