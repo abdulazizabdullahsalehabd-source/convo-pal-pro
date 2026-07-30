@@ -90,7 +90,7 @@ function isRepeatedReply(reply: string, history: ChatHistoryMessage[]) {
 
 type Candidate = {
   label: string;
-  run: (system: string) => Promise<AssistantReply | null>;
+  run: (system: string, history: ChatHistoryMessage[]) => Promise<AssistantReply | null>;
 };
 
 function buildCandidates(lovableKey?: string): Candidate[] {
@@ -104,11 +104,11 @@ function buildCandidates(lovableKey?: string): Candidate[] {
     for (const id of ["llama-3.3-70b-versatile", "llama-3.1-8b-instant"]) {
       list.push({
         label: `groq:${id}`,
-        run: async (system) => {
+        run: async (system, history) => {
           const { text } = await generateText({
             model: groq(id),
             system,
-            messages: history_ref.current,
+            messages: history,
             temperature: 0.7,
           });
           return fallbackParse(text);
@@ -126,11 +126,11 @@ function buildCandidates(lovableKey?: string): Candidate[] {
     ]) {
       list.push({
         label: `openrouter:${id}`,
-        run: async (system) => {
+        run: async (system, history) => {
           const { text } = await generateText({
             model: or(id),
             system,
-            messages: history_ref.current,
+            messages: history,
           });
           return fallbackParse(text);
         },
@@ -143,11 +143,11 @@ function buildCandidates(lovableKey?: string): Candidate[] {
     const gateway = createLovableAiGatewayProvider(lovableKey, { structuredOutputs: true });
     list.push({
       label: "lovable:openai/gpt-5.6-sol",
-      run: async (system) => {
+      run: async (system, history) => {
         const { output } = await generateText({
           model: gateway("openai/gpt-5.6-sol"),
           system,
-          messages: history_ref.current,
+          messages: history,
           output: Output.object({ schema: ReplySchema }),
           providerOptions: { lovable: { reasoningEffort: "none" } },
         });
@@ -159,9 +159,6 @@ function buildCandidates(lovableKey?: string): Candidate[] {
   return list;
 }
 
-// Simple module-local holder so candidate builders can read the current history.
-const history_ref: { current: ChatHistoryMessage[] } = { current: [] };
-
 export async function generateAssistantReply({
   apiKey,
   history,
@@ -171,7 +168,6 @@ export async function generateAssistantReply({
   history: ChatHistoryMessage[];
   userLanguage: "ar" | "en";
 }) {
-  history_ref.current = history;
   const candidates = buildCandidates(apiKey);
   if (candidates.length === 0) {
     throw new Error("لا يوجد مزوّد ذكاء اصطناعي مُهيّأ.");
@@ -187,6 +183,7 @@ export async function generateAssistantReply({
       try {
         const out = await candidate.run(
           attempt === 0 ? `${SYSTEM_PROMPT}${retrySuffix}` : `${SYSTEM_PROMPT}${retrySuffix}\n\nRETRY: your previous draft was invalid, off-language, or repeated.`,
+          history,
         );
         if (!out) {
           lastErr = new Error("Invalid JSON");
