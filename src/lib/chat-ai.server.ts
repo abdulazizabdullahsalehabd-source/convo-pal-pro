@@ -88,69 +88,141 @@ function isRepeatedReply(reply: string, history: ChatHistoryMessage[]) {
     .some((m) => normalizeText(m.content) === normalized);
 }
 
+type Candidate = {
+  label: string;
+  run: (system: string) => Promise<AssistantReply | null>;
+};
+
+function buildCandidates(lovableKey?: string): Candidate[] {
+  const list: Candidate[] = [];
+  const groqKey = process.env.GROQ_API_KEY;
+  const orKey = process.env.OPENROUTER_API_KEY;
+
+  // 1) Groq free tier (fast, generous limits)
+  if (groqKey) {
+    const groq = createGroqProvider(groqKey);
+    for (const id of ["llama-3.3-70b-versatile", "llama-3.1-8b-instant"]) {
+      list.push({
+        label: `groq:${id}`,
+        run: async (system) => {
+          const { text } = await generateText({
+            model: groq(id),
+            system,
+            messages: history_ref.current,
+            temperature: 0.7,
+          });
+          return fallbackParse(text);
+        },
+      });
+    }
+  }
+
+  // 2) OpenRouter free models
+  if (orKey) {
+    const or = createOpenRouterProvider(orKey);
+    for (const id of [
+      "meta-llama/llama-3.3-70b-instruct:free",
+      "google/gemma-2-9b-it:free",
+    ]) {
+      list.push({
+        label: `openrouter:${id}`,
+        run: async (system) => {
+          const { text } = await generateText({
+            model: or(id),
+            system,
+            messages: history_ref.current,
+          });
+          return fallbackParse(text);
+        },
+      });
+    }
+  }
+
+  // 3) Lovable AI Gateway (uses workspace credits)
+  if (lovableKey) {
+    const gateway = createLovableAiGatewayProvider(lovableKey, { structuredOutputs: true });
+    list.push({
+      label: "lovable:openai/gpt-5.6-sol",
+      run: async (system) => {
+        const { output } = await generateText({
+          model: gateway("openai/gpt-5.6-sol"),
+          system,
+          messages: history_ref.current,
+          output: Output.object({ schema: ReplySchema }),
+          providerOptions: { lovable: { reasoningEffort: "none" } },
+        });
+        return output;
+      },
+    });
+  }
+
+  return list;
+}
+
+// Simple module-local holder so candidate builders can read the current history.
+const history_ref: { current: ChatHistoryMessage[] } = { current: [] };
+
 export async function generateAssistantReply({
   apiKey,
   history,
   userLanguage,
 }: {
-  apiKey: string;
+  apiKey?: string;
   history: ChatHistoryMessage[];
   userLanguage: "ar" | "en";
 }) {
-  const gateway = createLovableAiGatewayProvider(apiKey, { structuredOutputs: true });
-  const modelId = "openai/gpt-5.6-sol";
+  history_ref.current = history;
+  const candidates = buildCandidates(apiKey);
+  if (candidates.length === 0) {
+    throw new Error("لا يوجد مزوّد ذكاء اصطناعي مُهيّأ.");
+  }
 
-  let parsed: AssistantReply | null = null;
+  const retrySuffix =
+    "\n\nIMPORTANT: Answer ONLY the latest user message with a fresh, direct reply. Output raw JSON only, no markdown fences.";
+
   let lastErr: unknown = null;
 
-  for (const attempt of [0, 1]) {
-    try {
-      const { output } = await generateText({
-        model: gateway(modelId),
-        system:
-          attempt === 0
-            ? SYSTEM_PROMPT
-            : `${SYSTEM_PROMPT}\n\nIMPORTANT RETRY: Your previous draft was invalid, off-language, or repeated. Answer ONLY the latest user message with a fresh, direct reply.`,
-        messages: history,
-        output: Output.object({ schema: ReplySchema }),
-        providerOptions: { lovable: { reasoningEffort: "none" } },
-      });
-
-      if (output.reply_language !== userLanguage) {
-        lastErr = new Error("Language mismatch");
-        continue;
-      }
-      if (isRepeatedReply(output.reply, history)) {
-        lastErr = new Error("Repeated reply");
-        continue;
-      }
-
-      parsed = output;
-      break;
-    } catch (err) {
-      lastErr = err;
-      if (NoObjectGeneratedError.isInstance(err)) {
-        const fb = fallbackParse(err.text ?? "");
-        if (fb && fb.reply_language === userLanguage && !isRepeatedReply(fb.reply, history)) {
-          parsed = fb;
-          break;
+  for (const candidate of candidates) {
+    for (const attempt of [0, 1]) {
+      try {
+        const out = await candidate.run(
+          attempt === 0 ? `${SYSTEM_PROMPT}${retrySuffix}` : `${SYSTEM_PROMPT}${retrySuffix}\n\nRETRY: your previous draft was invalid, off-language, or repeated.`,
+        );
+        if (!out) {
+          lastErr = new Error("Invalid JSON");
+          continue;
         }
+        if (out.reply_language !== userLanguage) {
+          lastErr = new Error("Language mismatch");
+          continue;
+        }
+        if (isRepeatedReply(out.reply, history)) {
+          lastErr = new Error("Repeated reply");
+          continue;
+        }
+        return out;
+      } catch (err) {
+        lastErr = err;
+        if (NoObjectGeneratedError.isInstance(err)) {
+          const fb = fallbackParse(err.text ?? "");
+          if (fb && fb.reply_language === userLanguage && !isRepeatedReply(fb.reply, history)) {
+            return fb;
+          }
+        }
+        const msg = err instanceof Error ? err.message : String(err);
+        // Provider exhausted / unavailable → move to the next provider immediately.
+        if (msg.includes("402") || msg.includes("401") || msg.includes("403") || msg.includes("404")) break;
+        if (msg.includes("429") || msg.includes("5")) continue;
       }
-      const msg = err instanceof Error ? err.message : String(err);
-      if (msg.includes("429") || msg.includes("503") || msg.includes("502")) continue;
-      if (msg === "Language mismatch" || msg === "Repeated reply") continue;
-      break;
     }
   }
 
-  if (!parsed) {
-    const msg = lastErr instanceof Error ? lastErr.message : String(lastErr);
-    if (msg.includes("429")) throw new Error("الخدمة مشغولة جداً الآن — حاول بعد ثوانٍ.");
-    if (msg.includes("402") || msg.includes("payment_required") || msg.includes("Not enough credits")) {
-      throw new Error("نفد رصيد الذكاء الاصطناعي المجاني مؤقتاً. رسالتك لم تضِع؛ حاول لاحقاً أو أضف رصيداً من إعدادات Lovable.");
-    }
-    throw new Error("تعذّر توليد الرد. حاول مرة أخرى.");
+  const msg = lastErr instanceof Error ? lastErr.message : String(lastErr);
+  if (msg.includes("402") || msg.includes("payment_required") || msg.includes("Not enough credits")) {
+    throw new Error(
+      "نفد رصيد المزوّد الحالي. أضف مفتاح Groq أو OpenRouter المجاني ليعمل التطبيق بلا حدود.",
+    );
   }
-
-  return parsed;
+  if (msg.includes("429")) throw new Error("الخدمة مشغولة جداً الآن — حاول بعد ثوانٍ.");
+  throw new Error("تعذّر توليد الرد. حاول مرة أخرى.");
 }
