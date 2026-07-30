@@ -84,6 +84,8 @@ export function useVoiceRecorder(onTranscript: (text: string, audioUrl?: string)
   const streamRef = useRef<MediaStream | null>(null);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const startedAtRef = useRef<number>(0);
+  const recognitionRef = useRef<any>(null);
+  const browserTextRef = useRef<string>("");
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -92,7 +94,36 @@ export function useVoiceRecorder(onTranscript: (text: string, audioUrl?: string)
     );
   }, []);
 
+  const startBrowserRecognition = () => {
+    if (typeof window === "undefined") return;
+    const SR =
+      (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+    if (!SR) return;
+    try {
+      const rec = new SR();
+      rec.continuous = true;
+      rec.interimResults = false;
+      rec.lang = "en-US";
+      rec.onresult = (event: any) => {
+        let out = "";
+        for (let i = 0; i < event.results.length; i++) {
+          out += `${event.results[i][0]?.transcript ?? ""} `;
+        }
+        browserTextRef.current = out.trim();
+      };
+      rec.onerror = () => {};
+      rec.start();
+      recognitionRef.current = rec;
+    } catch {}
+  };
+
+  const stopBrowserRecognition = () => {
+    try { recognitionRef.current?.stop(); } catch {}
+    recognitionRef.current = null;
+  };
+
   const cleanupStream = () => {
+    stopBrowserRecognition();
     try { processorRef.current?.disconnect(); } catch {}
     try { sourceRef.current?.disconnect(); } catch {}
     processorRef.current = null;
@@ -146,6 +177,8 @@ export function useVoiceRecorder(onTranscript: (text: string, audioUrl?: string)
       if (ctx.state === "suspended") {
         try { await ctx.resume(); } catch {}
       }
+      browserTextRef.current = "";
+      startBrowserRecognition();
       setStatus("recording");
     } catch (e) {
       cleanupStream();
@@ -190,14 +223,21 @@ export function useVoiceRecorder(onTranscript: (text: string, audioUrl?: string)
         throw new Error(msg || `HTTP ${res.status}`);
       }
       const { text } = (await res.json()) as { text?: string };
+      const browserText = browserTextRef.current.trim();
       if (text && text.trim()) onTranscript(text.trim(), audioUrl);
+      else if (browserText) onTranscript(browserText, audioUrl);
       else {
         URL.revokeObjectURL(audioUrl);
         setError("لم أتمكن من فهم الصوت — حاول مجدداً.");
       }
     } catch (e) {
-      URL.revokeObjectURL(audioUrl);
-      setError(e instanceof Error ? e.message : "فشل التحويل الصوتي");
+      const browserText = browserTextRef.current.trim();
+      if (browserText) {
+        onTranscript(browserText, audioUrl);
+      } else {
+        URL.revokeObjectURL(audioUrl);
+        setError(e instanceof Error ? e.message : "فشل التحويل الصوتي");
+      }
     } finally {
       setStatus("idle");
     }
@@ -222,6 +262,9 @@ let currentPlaybackToken = 0;
 
 function stopCurrentPlayback() {
   currentPlaybackToken++;
+  if (typeof window !== "undefined" && "speechSynthesis" in window) {
+    try { window.speechSynthesis.cancel(); } catch {}
+  }
   if (currentDoneTimer) {
     clearTimeout(currentDoneTimer);
     currentDoneTimer = null;
@@ -244,6 +287,25 @@ function friendlyAudioError(status: number, message: string) {
     return "نفد رصيد الصوت المجاني مؤقتاً — أوقف القراءة التلقائية أو حاول لاحقاً.";
   }
   return message || "تعذّر تشغيل الصوت.";
+}
+
+function speakWithBrowser(text: string, lang: "en" | "ar", onEnded?: () => void) {
+  if (typeof window === "undefined" || !("speechSynthesis" in window)) return false;
+  try {
+    window.speechSynthesis.cancel();
+    const utter = new SpeechSynthesisUtterance(text);
+    utter.lang = lang === "ar" ? "ar-SA" : "en-US";
+    utter.rate = 1;
+    const voices = window.speechSynthesis.getVoices();
+    const match = voices.find((v) => v.lang?.toLowerCase().startsWith(lang === "ar" ? "ar" : "en"));
+    if (match) utter.voice = match;
+    utter.onend = () => onEnded?.();
+    utter.onerror = () => onEnded?.();
+    window.speechSynthesis.speak(utter);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 export async function speak(text: string, lang: "en" | "ar", voice?: string, onEnded?: () => void) {
@@ -269,6 +331,8 @@ export async function speak(text: string, lang: "en" | "ar", voice?: string, onE
   }
   if (!res.ok || !res.body) {
     const msg = await res.text().catch(() => "");
+    // Free, unlimited fallback: the browser's built-in speech engine.
+    if (speakWithBrowser(text, lang, onEnded)) return;
     throw new Error(friendlyAudioError(res.status, msg));
   }
 
