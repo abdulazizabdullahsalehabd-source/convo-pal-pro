@@ -121,8 +121,8 @@ function buildCandidates(lovableKey?: string): Candidate[] {
   if (orKey) {
     const or = createOpenRouterProvider(orKey);
     for (const id of [
-      "meta-llama/llama-3.3-70b-instruct:free",
-      "google/gemma-2-9b-it:free",
+      "google/gemma-4-31b-it:free",
+      "openai/gpt-oss-20b:free",
     ]) {
       list.push({
         label: `openrouter:${id}`,
