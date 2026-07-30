@@ -1,6 +1,10 @@
 import { generateText, NoObjectGeneratedError, Output } from "ai";
 import { z } from "zod";
-import { createLovableAiGatewayProvider } from "./ai-gateway.server";
+import {
+  createGroqProvider,
+  createLovableAiGatewayProvider,
+  createOpenRouterProvider,
+} from "./ai-gateway.server";
 
 export type ChatHistoryMessage = {
   role: "user" | "assistant";
