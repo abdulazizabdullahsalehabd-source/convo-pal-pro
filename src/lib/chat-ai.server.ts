@@ -33,10 +33,17 @@ ABSOLUTE RULES:
 
 ENGLISH REPLIES:
 - Use natural, correct, everyday English with no spelling or grammar mistakes.
-- If the user's English has a real grammar / word-choice / phrasing mistake, fill correction with { wrong, correct, hint } where hint is a very short Arabic explanation. If the English is fine, set correction to null. Do not invent mistakes.
+- Inspect the user's LAST English message word by word. If it contains ANY real mistake (grammar, verb tense, articles, prepositions, word order, word choice, or spelling), you MUST fill correction with { wrong, correct, hint }:
+  - wrong = the exact incorrect phrase copied from the user's message (not the whole message unless needed).
+  - correct = the corrected version of that same phrase.
+  - hint = a very short Arabic explanation of the rule (under 12 words).
+  Examples: "I no like coffee" -> wrong:"I no like coffee", correct:"I don't like coffee", hint:"النفي في المضارع البسيط يكون بـ don't".
+  "She go to school" -> wrong:"She go", correct:"She goes", hint:"مع He/She/It نضيف s للفعل".
+  Only set correction to null when the English is genuinely correct. Never invent a mistake, but never ignore a real one.
 
 ARABIC REPLIES:
 - Reply in fluent, grammatically correct Modern Standard Arabic (فصحى سليمة), with correct grammar and clear meaning.
+- Write Arabic that is easy to read aloud: complete sentences, correct punctuation, no transliteration, no Latin words, no emoji inside the middle of sentences.
 - End the Arabic reply with one short, warm Arabic sentence encouraging the user to try English next time. Vary the sentence each time.
 - Set correction to null (we correct English only).
 
@@ -46,6 +53,15 @@ IDENTITY:
 ${DEVELOPER_INFO}
 
 Reply ONLY with valid JSON matching the schema: { reply: string, reply_language: "en"|"ar", correction: null | { wrong: string, correct: string, hint: string } }`;
+
+const CORRECTION_SYSTEM = `You are a strict but kind English teacher for Arabic-speaking learners.
+You receive ONE sentence a learner said in English.
+Find the single most important real mistake (grammar, tense, article, preposition, word order, word choice, spelling).
+Reply ONLY with JSON: { "correction": null | { "wrong": string, "correct": string, "hint": string } }
+- wrong: the exact incorrect phrase copied from the learner's sentence.
+- correct: the fixed phrase.
+- hint: a very short Arabic explanation (under 12 words).
+If the sentence is fully correct natural English, reply { "correction": null }. Never invent mistakes.`;
 
 export const ReplySchema = z.object({
   reply: z.string(),
@@ -101,7 +117,7 @@ function buildCandidates(lovableKey?: string): Candidate[] {
   // 1) Groq free tier (fast, generous limits)
   if (groqKey) {
     const groq = createGroqProvider(groqKey);
-    for (const id of ["llama-3.3-70b-versatile", "llama-3.1-8b-instant"]) {
+    for (const id of ["openai/gpt-oss-120b", "llama-3.3-70b-versatile", "llama-3.1-8b-instant"]) {
       list.push({
         label: `groq:${id}`,
         run: async (system, history) => {
@@ -109,7 +125,8 @@ function buildCandidates(lovableKey?: string): Candidate[] {
             model: groq(id),
             system,
             messages: history,
-            temperature: 0.7,
+            temperature: 0.6,
+            providerOptions: { groq: { response_format: { type: "json_object" } } },
           });
           return fallbackParse(text);
         },
@@ -131,6 +148,7 @@ function buildCandidates(lovableKey?: string): Candidate[] {
             model: or(id),
             system,
             messages: history,
+            providerOptions: { openrouter: { response_format: { type: "json_object" } } },
           });
           return fallbackParse(text);
         },
