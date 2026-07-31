@@ -79,7 +79,7 @@ export const Route = createFileRoute("/api/speak")({
         if (!res || !res.ok || !res.body) {
           const err = lastErr;
           const status = res?.status ?? 500;
-          if (res.status === 402 || err.includes("payment_required") || err.includes("Not enough credits")) {
+          if (status === 402 || err.includes("payment_required") || err.includes("Not enough credits")) {
             return new Response("نفد رصيد النطق الصوتي المجاني مؤقتاً — أوقف القراءة التلقائية أو حاول لاحقاً.", { status: 402 });
           }
           return new Response(err || `TTS failed: ${status}`, { status });
