@@ -104,6 +104,85 @@ function isRepeatedReply(reply: string, history: ChatHistoryMessage[]) {
     .some((m) => normalizeText(m.content) === normalized);
 }
 
+const CorrectionOnlySchema = z.object({
+  correction: z
+    .object({ wrong: z.string(), correct: z.string(), hint: z.string() })
+    .nullable(),
+});
+
+// Dedicated grammar pass so the correction alert reliably appears for English messages.
+async function detectCorrection(
+  userText: string,
+  lovableKey?: string,
+): Promise<AssistantReply["correction"]> {
+  const text = userText.trim();
+  if (!text || /[\u0600-\u06FF]/.test(text)) return null;
+
+  const groqKey = process.env.GROQ_API_KEY;
+  const orKey = process.env.OPENROUTER_API_KEY;
+
+  const runs: Array<() => Promise<string>> = [];
+  if (groqKey) {
+    const groq = createGroqProvider(groqKey);
+    runs.push(async () => {
+      const { text: out } = await generateText({
+        model: groq("llama-3.3-70b-versatile"),
+        system: CORRECTION_SYSTEM,
+        prompt: text,
+        temperature: 0,
+        providerOptions: { groq: { response_format: { type: "json_object" } } },
+      });
+      return out;
+    });
+  }
+  if (orKey) {
+    const or = createOpenRouterProvider(orKey);
+    runs.push(async () => {
+      const { text: out } = await generateText({
+        model: or("openai/gpt-oss-20b:free"),
+        system: CORRECTION_SYSTEM,
+        prompt: text,
+      });
+      return out;
+    });
+  }
+  if (lovableKey) {
+    const gateway = createLovableAiGatewayProvider(lovableKey, { structuredOutputs: true });
+    runs.push(async () => {
+      const { text: out } = await generateText({
+        model: gateway("openai/gpt-5.6-luna"),
+        system: CORRECTION_SYSTEM,
+        prompt: text,
+        providerOptions: { lovable: { reasoningEffort: "none" } },
+      });
+      return out;
+    });
+  }
+
+  for (const run of runs) {
+    try {
+      const raw = await run();
+      const m = raw.match(/\{[\s\S]*\}/);
+      if (!m) continue;
+      const parsed = CorrectionOnlySchema.safeParse(JSON.parse(m[0]));
+      if (!parsed.success) continue;
+      const c = parsed.data.correction;
+      if (!c) return null;
+      if (
+        !c.wrong.trim() ||
+        !c.correct.trim() ||
+        normalizeText(c.wrong) === normalizeText(c.correct)
+      ) {
+        return null;
+      }
+      return c;
+    } catch {
+      // try the next provider
+    }
+  }
+  return null;
+}
+
 type Candidate = {
   label: string;
   run: (system: string, history: ChatHistoryMessage[]) => Promise<AssistantReply | null>;
