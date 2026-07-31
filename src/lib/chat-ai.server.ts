@@ -191,6 +191,8 @@ export async function generateAssistantReply({
     throw new Error("لا يوجد مزوّد ذكاء اصطناعي مُهيّأ.");
   }
 
+  const lastUser = [...history].reverse().find((m) => m.role === "user")?.content ?? "";
+
   const retrySuffix =
     "\n\nIMPORTANT: Answer ONLY the latest user message with a fresh, direct reply. Output raw JSON only, no markdown fences.";
 
@@ -214,6 +216,9 @@ export async function generateAssistantReply({
         if (isRepeatedReply(out.reply, history)) {
           lastErr = new Error("Repeated reply");
           continue;
+        }
+        if (userLanguage === "en" && !out.correction) {
+          out.correction = await detectCorrection(lastUser, apiKey);
         }
         return out;
       } catch (err) {
