@@ -33,10 +33,17 @@ ABSOLUTE RULES:
 
 ENGLISH REPLIES:
 - Use natural, correct, everyday English with no spelling or grammar mistakes.
-- If the user's English has a real grammar / word-choice / phrasing mistake, fill correction with { wrong, correct, hint } where hint is a very short Arabic explanation. If the English is fine, set correction to null. Do not invent mistakes.
+- Inspect the user's LAST English message word by word. If it contains ANY real mistake (grammar, verb tense, articles, prepositions, word order, word choice, or spelling), you MUST fill correction with { wrong, correct, hint }:
+  - wrong = the exact incorrect phrase copied from the user's message (not the whole message unless needed).
+  - correct = the corrected version of that same phrase.
+  - hint = a very short Arabic explanation of the rule (under 12 words).
+  Examples: "I no like coffee" -> wrong:"I no like coffee", correct:"I don't like coffee", hint:"النفي في المضارع البسيط يكون بـ don't".
+  "She go to school" -> wrong:"She go", correct:"She goes", hint:"مع He/She/It نضيف s للفعل".
+  Only set correction to null when the English is genuinely correct. Never invent a mistake, but never ignore a real one.
 
 ARABIC REPLIES:
 - Reply in fluent, grammatically correct Modern Standard Arabic (فصحى سليمة), with correct grammar and clear meaning.
+- Write Arabic that is easy to read aloud: complete sentences, correct punctuation, no transliteration, no Latin words, no emoji inside the middle of sentences.
 - End the Arabic reply with one short, warm Arabic sentence encouraging the user to try English next time. Vary the sentence each time.
 - Set correction to null (we correct English only).
 
@@ -46,6 +53,15 @@ IDENTITY:
 ${DEVELOPER_INFO}
 
 Reply ONLY with valid JSON matching the schema: { reply: string, reply_language: "en"|"ar", correction: null | { wrong: string, correct: string, hint: string } }`;
+
+const CORRECTION_SYSTEM = `You are a strict but kind English teacher for Arabic-speaking learners.
+You receive ONE sentence a learner said in English.
+Find the single most important real mistake (grammar, tense, article, preposition, word order, word choice, spelling).
+Reply ONLY with JSON: { "correction": null | { "wrong": string, "correct": string, "hint": string } }
+- wrong: the exact incorrect phrase copied from the learner's sentence.
+- correct: the fixed phrase.
+- hint: a very short Arabic explanation (under 12 words).
+If the sentence is fully correct natural English, reply { "correction": null }. Never invent mistakes.`;
 
 export const ReplySchema = z.object({
   reply: z.string(),
@@ -88,6 +104,85 @@ function isRepeatedReply(reply: string, history: ChatHistoryMessage[]) {
     .some((m) => normalizeText(m.content) === normalized);
 }
 
+const CorrectionOnlySchema = z.object({
+  correction: z
+    .object({ wrong: z.string(), correct: z.string(), hint: z.string() })
+    .nullable(),
+});
+
+// Dedicated grammar pass so the correction alert reliably appears for English messages.
+async function detectCorrection(
+  userText: string,
+  lovableKey?: string,
+): Promise<AssistantReply["correction"]> {
+  const text = userText.trim();
+  if (!text || /[\u0600-\u06FF]/.test(text)) return null;
+
+  const groqKey = process.env.GROQ_API_KEY;
+  const orKey = process.env.OPENROUTER_API_KEY;
+
+  const runs: Array<() => Promise<string>> = [];
+  if (groqKey) {
+    const groq = createGroqProvider(groqKey);
+    runs.push(async () => {
+      const { text: out } = await generateText({
+        model: groq("llama-3.3-70b-versatile"),
+        system: CORRECTION_SYSTEM,
+        prompt: text,
+        temperature: 0,
+        providerOptions: { groq: { response_format: { type: "json_object" } } },
+      });
+      return out;
+    });
+  }
+  if (orKey) {
+    const or = createOpenRouterProvider(orKey);
+    runs.push(async () => {
+      const { text: out } = await generateText({
+        model: or("openai/gpt-oss-20b:free"),
+        system: CORRECTION_SYSTEM,
+        prompt: text,
+      });
+      return out;
+    });
+  }
+  if (lovableKey) {
+    const gateway = createLovableAiGatewayProvider(lovableKey, { structuredOutputs: true });
+    runs.push(async () => {
+      const { text: out } = await generateText({
+        model: gateway("openai/gpt-5.6-luna"),
+        system: CORRECTION_SYSTEM,
+        prompt: text,
+        providerOptions: { lovable: { reasoningEffort: "none" } },
+      });
+      return out;
+    });
+  }
+
+  for (const run of runs) {
+    try {
+      const raw = await run();
+      const m = raw.match(/\{[\s\S]*\}/);
+      if (!m) continue;
+      const parsed = CorrectionOnlySchema.safeParse(JSON.parse(m[0]));
+      if (!parsed.success) continue;
+      const c = parsed.data.correction;
+      if (!c) return null;
+      if (
+        !c.wrong.trim() ||
+        !c.correct.trim() ||
+        normalizeText(c.wrong) === normalizeText(c.correct)
+      ) {
+        return null;
+      }
+      return c;
+    } catch {
+      // try the next provider
+    }
+  }
+  return null;
+}
+
 type Candidate = {
   label: string;
   run: (system: string, history: ChatHistoryMessage[]) => Promise<AssistantReply | null>;
@@ -101,7 +196,7 @@ function buildCandidates(lovableKey?: string): Candidate[] {
   // 1) Groq free tier (fast, generous limits)
   if (groqKey) {
     const groq = createGroqProvider(groqKey);
-    for (const id of ["llama-3.3-70b-versatile", "llama-3.1-8b-instant"]) {
+    for (const id of ["openai/gpt-oss-120b", "llama-3.3-70b-versatile", "llama-3.1-8b-instant"]) {
       list.push({
         label: `groq:${id}`,
         run: async (system, history) => {
@@ -109,7 +204,8 @@ function buildCandidates(lovableKey?: string): Candidate[] {
             model: groq(id),
             system,
             messages: history,
-            temperature: 0.7,
+            temperature: 0.6,
+            providerOptions: { groq: { response_format: { type: "json_object" } } },
           });
           return fallbackParse(text);
         },
@@ -131,6 +227,7 @@ function buildCandidates(lovableKey?: string): Candidate[] {
             model: or(id),
             system,
             messages: history,
+            providerOptions: { openrouter: { response_format: { type: "json_object" } } },
           });
           return fallbackParse(text);
         },
@@ -173,6 +270,8 @@ export async function generateAssistantReply({
     throw new Error("لا يوجد مزوّد ذكاء اصطناعي مُهيّأ.");
   }
 
+  const lastUser = [...history].reverse().find((m) => m.role === "user")?.content ?? "";
+
   const retrySuffix =
     "\n\nIMPORTANT: Answer ONLY the latest user message with a fresh, direct reply. Output raw JSON only, no markdown fences.";
 
@@ -196,6 +295,9 @@ export async function generateAssistantReply({
         if (isRepeatedReply(out.reply, history)) {
           lastErr = new Error("Repeated reply");
           continue;
+        }
+        if (userLanguage === "en" && !out.correction) {
+          out.correction = await detectCorrection(lastUser, apiKey);
         }
         return out;
       } catch (err) {

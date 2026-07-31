@@ -19,6 +19,8 @@ function cleanForTTS(input: string): string {
     .replace(/[\uFE00-\uFE0F\u200D]/g, "")
     // Markdown-y decoration
     .replace(/[*_`~#>|]/g, " ")
+    // Collapse repeated punctuation that makes TTS stumble
+    .replace(/([!?،,.])\1+/g, "$1")
     .replace(/\s+/g, " ")
     .trim();
 }
@@ -37,12 +39,12 @@ export const Route = createFileRoute("/api/speak")({
         const isArabic = lang === "ar";
         const voiceName = voice && VOICES.has(voice) ? voice : "Kore";
         const prompt = isArabic
-          ? `اقرأ النص التالي بلهجة عربية فصيحة واضحة وطبيعية وبنطق سليم: ${clean}`
-          : `Read the following text in clear, natural, friendly English: ${clean}`;
+          ? `اقرأ النص التالي بالعربية الفصحى بنطق سليم ومخارج حروف صحيحة، بصوت طبيعي دافئ وهادئ، مع الالتزام بقواعد النحو والإعراب وتشكيل أواخر الكلمات تشكيلاً صحيحاً، والوقف عند علامات الترقيم، وبسرعة معتدلة وواضحة. اقرأ النص فقط دون إضافة أي كلمة:\n\n${clean}`
+          : `Read the following text in clear, natural, friendly English with correct pronunciation, natural intonation and a moderate pace. Read only the text, do not add anything:\n\n${clean}`;
 
         // Use Gemini TTS for BOTH Arabic and English — same voice catalog, consistent quality.
-        const body = {
-          model: "google/gemini-2.5-flash-tts",
+        const buildBody = (model: string) => ({
+          model,
           stream_format: "sse",
           contents: [{ role: "user", parts: [{ text: prompt }] }],
           generationConfig: {
@@ -51,23 +53,36 @@ export const Route = createFileRoute("/api/speak")({
               voiceConfig: { prebuiltVoiceConfig: { voiceName } },
             },
           },
-        };
-
-        const res = await fetch("https://ai.gateway.lovable.dev/v1/audio/speech", {
-          method: "POST",
-          headers: {
-            Authorization: `Bearer ${key}`,
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify(body),
         });
 
-        if (!res.ok || !res.body) {
-          const err = await res.text().catch(() => "");
-          if (res.status === 402 || err.includes("payment_required") || err.includes("Not enough credits")) {
+        // Arabic gets the higher-quality model first for correct grammar/pronunciation.
+        const models = isArabic
+          ? ["google/gemini-2.5-pro-tts", "google/gemini-2.5-flash-tts"]
+          : ["google/gemini-2.5-flash-tts", "google/gemini-2.5-pro-tts"];
+
+        let res: Response | null = null;
+        let lastErr = "";
+        for (const model of models) {
+          res = await fetch("https://ai.gateway.lovable.dev/v1/audio/speech", {
+            method: "POST",
+            headers: {
+              Authorization: `Bearer ${key}`,
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify(buildBody(model)),
+          });
+          if (res.ok && res.body) break;
+          lastErr = await res.text().catch(() => "");
+          if (res.status === 402) break;
+        }
+
+        if (!res || !res.ok || !res.body) {
+          const err = lastErr;
+          const status = res?.status ?? 500;
+          if (status === 402 || err.includes("payment_required") || err.includes("Not enough credits")) {
             return new Response("نفد رصيد النطق الصوتي المجاني مؤقتاً — أوقف القراءة التلقائية أو حاول لاحقاً.", { status: 402 });
           }
-          return new Response(err || `TTS failed: ${res.status}`, { status: res.status });
+          return new Response(err || `TTS failed: ${status}`, { status });
         }
 
         return new Response(res.body, {
