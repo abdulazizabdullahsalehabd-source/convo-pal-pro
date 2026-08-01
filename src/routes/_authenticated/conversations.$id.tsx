@@ -15,12 +15,16 @@ const VOICES: { id: string; label: string; gender: "male" | "female" }[] = [
   { id: "Leda", label: "ليدا — أنثى شابة", gender: "female" },
   { id: "Callirrhoe", label: "كاليروي — أنثى واثقة", gender: "female" },
   { id: "Autonoe", label: "أوتونوي — أنثى ناعمة", gender: "female" },
+  { id: "Erinome", label: "إرينومي — أنثى رصينة", gender: "female" },
+  { id: "Laomedeia", label: "لاوميديا — أنثى نشيطة", gender: "female" },
   { id: "Puck", label: "باك — ذكر مرح", gender: "male" },
   { id: "Charon", label: "كارون — ذكر عميق", gender: "male" },
   { id: "Fenrir", label: "فينرير — ذكر قوي", gender: "male" },
   { id: "Orus", label: "أوروس — ذكر واضح", gender: "male" },
   { id: "Enceladus", label: "إنسيلادوس — ذكر هادئ", gender: "male" },
   { id: "Iapetus", label: "إيابيتوس — ذكر ثابت", gender: "male" },
+  { id: "Algenib", label: "الجنب — ذكر جهوري", gender: "male" },
+  { id: "Sadaltager", label: "سعد التاجر — ذكر متزن", gender: "male" },
 ];
 const VOICE_KEY = "cf-voice";
 const AUTO_SPEAK_KEY = "cf-auto-speak";
@@ -259,6 +263,18 @@ function ChatScreen() {
             ))}
           </optgroup>
         </select>
+        <button
+          type="button"
+          onClick={() => {
+            stopSpeaking();
+            speak("مرحباً، أنا صديق المحادثة. هذا هو صوتي.", "ar", voice);
+          }}
+          className="w-9 h-9 rounded-lg flex items-center justify-center border border-slate-200 bg-slate-100 text-slate-600"
+          aria-label="جرّب الصوت"
+          title="جرّب الصوت"
+        >
+          <Sparkles className="w-4 h-4" />
+        </button>
       </header>
 
       <div ref={scrollRef} className="flex-1 overflow-y-auto px-3 py-4 space-y-3">

@@ -289,16 +289,43 @@ function friendlyAudioError(status: number, message: string) {
   return message || "تعذّر تشغيل الصوت.";
 }
 
-function speakWithBrowser(text: string, lang: "en" | "ar", onEnded?: () => void) {
+const MALE_VOICE_IDS = new Set([
+  "Puck", "Charon", "Fenrir", "Orus", "Enceladus", "Iapetus", "Algenib", "Sadaltager",
+]);
+
+function speakWithBrowser(
+  text: string,
+  lang: "en" | "ar",
+  voiceId?: string,
+  onEnded?: () => void,
+) {
   if (typeof window === "undefined" || !("speechSynthesis" in window)) return false;
   try {
     window.speechSynthesis.cancel();
     const utter = new SpeechSynthesisUtterance(text);
     utter.lang = lang === "ar" ? "ar-SA" : "en-US";
     utter.rate = 1;
-    const voices = window.speechSynthesis.getVoices();
-    const match = voices.find((v) => v.lang?.toLowerCase().startsWith(lang === "ar" ? "ar" : "en"));
-    if (match) utter.voice = match;
+    const prefix = lang === "ar" ? "ar" : "en";
+    const pool = window.speechSynthesis
+      .getVoices()
+      .filter((v) => v.lang?.toLowerCase().startsWith(prefix));
+    if (pool.length) {
+      const wantMale = voiceId ? MALE_VOICE_IDS.has(voiceId) : false;
+      const maleHint = /male|hamed|naayf|omar|شاكر|رجل/i;
+      const femaleHint = /female|zariyah|salma|hoda|amina|woman/i;
+      const byGender = pool.filter((v) =>
+        wantMale
+          ? maleHint.test(v.name) && !/female/i.test(v.name)
+          : femaleHint.test(v.name),
+      );
+      // Keep different app voices mapped to different system voices when possible.
+      const candidates = byGender.length ? byGender : pool;
+      const idx = voiceId
+        ? [...voiceId].reduce((a, c) => a + c.charCodeAt(0), 0) % candidates.length
+        : 0;
+      utter.voice = candidates[idx];
+      utter.pitch = wantMale ? 0.85 : 1.05;
+    }
     utter.onend = () => onEnded?.();
     utter.onerror = () => onEnded?.();
     window.speechSynthesis.speak(utter);
@@ -332,7 +359,7 @@ export async function speak(text: string, lang: "en" | "ar", voice?: string, onE
   if (!res.ok || !res.body) {
     const msg = await res.text().catch(() => "");
     // Free, unlimited fallback: the browser's built-in speech engine.
-    if (speakWithBrowser(text, lang, onEnded)) return;
+    if (speakWithBrowser(text, lang, voice, onEnded)) return;
     throw new Error(friendlyAudioError(res.status, msg));
   }
 
