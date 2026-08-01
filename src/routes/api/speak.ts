@@ -4,8 +4,8 @@ type SpeakBody = { text?: string; lang?: "ar" | "en"; voice?: string };
 
 // Curated Gemini prebuilt voices (support both Arabic and English).
 const VOICES = new Set([
-  "Kore", "Aoede", "Leda", "Callirrhoe", "Autonoe", "Despina", // female
-  "Puck", "Charon", "Fenrir", "Orus", "Enceladus", "Iapetus", // male
+  "Kore", "Aoede", "Leda", "Callirrhoe", "Autonoe", "Despina", "Erinome", "Laomedeia", // female
+  "Puck", "Charon", "Fenrir", "Orus", "Enceladus", "Iapetus", "Algenib", "Sadaltager", // male
 ]);
 
 // Strip emoji, symbols, and decoration so TTS reads only actual words.
@@ -25,6 +25,20 @@ function cleanForTTS(input: string): string {
     .trim();
 }
 
+// Arabic-specific normalization so pronunciation stays accurate.
+function normalizeArabic(input: string): string {
+  return input
+    // Remove existing diacritics/tatweel: the model reads undiacritized MSA better than half-marked text.
+    .replace(/[\u064B-\u0652\u0670\u0640]/g, "")
+    // Arabic-Indic digits -> Western digits (read more reliably)
+    .replace(/[\u0660-\u0669]/g, (d) => String(d.charCodeAt(0) - 0x0660))
+    // Latin punctuation that breaks Arabic prosody
+    .replace(/;/g, "،")
+    .replace(/\s*([،.!؟?])\s*/g, "$1 ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
 export const Route = createFileRoute("/api/speak")({
   server: {
     handlers: {
@@ -33,14 +47,16 @@ export const Route = createFileRoute("/api/speak")({
         if (!key) return new Response("Missing LOVABLE_API_KEY", { status: 500 });
 
         const { text, lang, voice } = (await request.json()) as SpeakBody;
-        const clean = cleanForTTS(text ?? "");
+        let clean = cleanForTTS(text ?? "");
         if (!clean) return new Response("Empty text", { status: 400 });
 
         const isArabic = lang === "ar";
+        if (isArabic) clean = normalizeArabic(clean);
         const voiceName = voice && VOICES.has(voice) ? voice : "Kore";
+        // Keep the direction short: long instructions make Gemini-TTS drift or read them aloud.
         const prompt = isArabic
-          ? `اقرأ النص التالي بالعربية الفصحى بنطق سليم ومخارج حروف صحيحة، بصوت طبيعي دافئ وهادئ، مع الالتزام بقواعد النحو والإعراب وتشكيل أواخر الكلمات تشكيلاً صحيحاً، والوقف عند علامات الترقيم، وبسرعة معتدلة وواضحة. اقرأ النص فقط دون إضافة أي كلمة:\n\n${clean}`
-          : `Read the following text in clear, natural, friendly English with correct pronunciation, natural intonation and a moderate pace. Read only the text, do not add anything:\n\n${clean}`;
+          ? `اقرأ بالعربية الفصحى، نطقاً سليماً وإعراباً صحيحاً، بهدوء ووضوح وسرعة معتدلة:\n${clean}`
+          : `Read in clear, natural English with correct pronunciation and a moderate pace:\n${clean}`;
 
         // Use Gemini TTS for BOTH Arabic and English — same voice catalog, consistent quality.
         const buildBody = (model: string) => ({
@@ -57,8 +73,17 @@ export const Route = createFileRoute("/api/speak")({
 
         // Arabic gets the higher-quality model first for correct grammar/pronunciation.
         const models = isArabic
-          ? ["google/gemini-2.5-pro-tts", "google/gemini-2.5-flash-tts"]
-          : ["google/gemini-2.5-flash-tts", "google/gemini-2.5-pro-tts"];
+          ? [
+              "google/gemini-2.5-pro-tts",
+              "google/gemini-3.1-flash-tts-preview",
+              "google/gemini-2.5-flash-tts",
+              "google/gemini-2.5-flash-lite-preview-tts",
+            ]
+          : [
+              "google/gemini-2.5-flash-tts",
+              "google/gemini-3.1-flash-tts-preview",
+              "google/gemini-2.5-pro-tts",
+            ];
 
         let res: Response | null = null;
         let lastErr = "";
