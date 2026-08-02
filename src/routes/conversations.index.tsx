@@ -1,16 +1,15 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useServerFn } from "@tanstack/react-start";
 import { useState } from "react";
 import { toast } from "sonner";
-import { Plus, MessageSquare, Trash2, LogOut, Sparkles } from "lucide-react";
-import { createConversation, deleteConversation, listConversations } from "@/lib/chat.functions";
-import { supabase } from "@/integrations/supabase/client";
+import { Plus, MessageSquare, Trash2, Sparkles } from "lucide-react";
+import { createConversation, deleteConversation, listConversations } from "@/lib/local-chat";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 
 export const Route = createFileRoute("/conversations/")({
+  ssr: false,
   head: () => ({
     meta: [
       { title: "محادثاتي — صديق المحادثة" },
@@ -25,18 +24,18 @@ export const Route = createFileRoute("/conversations/")({
 });
 
 function ConversationsList() {
-  const list = useServerFn(listConversations);
-  const create = useServerFn(createConversation);
-  const del = useServerFn(deleteConversation);
   const qc = useQueryClient();
   const navigate = useNavigate();
   const [open, setOpen] = useState(false);
   const [title, setTitle] = useState("");
 
-  const { data, isLoading } = useQuery({ queryKey: ["conversations"], queryFn: () => list() });
+  const { data, isLoading } = useQuery({
+    queryKey: ["conversations"],
+    queryFn: async () => listConversations(),
+  });
 
   const createMut = useMutation({
-    mutationFn: (t: string) => create({ data: { title: t } }),
+    mutationFn: async (t: string) => createConversation(t),
     onSuccess: (row) => {
       qc.invalidateQueries({ queryKey: ["conversations"] });
       setOpen(false);
@@ -47,14 +46,9 @@ function ConversationsList() {
   });
 
   const delMut = useMutation({
-    mutationFn: (id: string) => del({ data: { id } }),
+    mutationFn: async (id: string) => deleteConversation(id),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["conversations"] }),
   });
-
-  const signOut = async () => {
-    await supabase.auth.signOut();
-    navigate({ to: "/" });
-  };
 
   return (
     <div className="min-h-dvh bg-slate-50">
@@ -65,12 +59,9 @@ function ConversationsList() {
           </div>
           <div>
             <div className="font-bold text-slate-900 text-sm">صديق المحادثة</div>
-            <div className="text-[11px] text-slate-500">محادثاتك المحفوظة</div>
+            <div className="text-[11px] text-slate-500">محادثاتك محفوظة على هذا الجهاز</div>
           </div>
         </div>
-        <Button variant="ghost" size="icon" onClick={signOut} aria-label="خروج">
-          <LogOut className="w-5 h-5" />
-        </Button>
       </header>
 
       <main className="max-w-xl mx-auto px-4 py-4 pb-28">
