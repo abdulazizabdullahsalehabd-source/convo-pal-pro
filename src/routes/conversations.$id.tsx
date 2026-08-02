@@ -36,7 +36,7 @@ function friendlyError(message: string) {
   return message;
 }
 
-export const Route = createFileRoute("/_authenticated/conversations/$id")({
+export const Route = createFileRoute("/conversations/$id")({
   head: () => ({
     meta: [
       { title: "محادثة — صديق المحادثة" },

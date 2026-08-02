@@ -9,20 +9,25 @@
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
 import { Route as rootRouteImport } from './routes/__root'
-import { Route as AuthenticatedRouteRouteImport } from './routes/_authenticated/route'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as ConversationsIndexRouteImport } from './routes/conversations.index'
+import { Route as ConversationsIdRouteImport } from './routes/conversations.$id'
 import { Route as ApiTranscribeRouteImport } from './routes/api/transcribe'
 import { Route as ApiSpeakRouteImport } from './routes/api/speak'
-import { Route as AuthenticatedConversationsIndexRouteImport } from './routes/_authenticated/conversations.index'
-import { Route as AuthenticatedConversationsIdRouteImport } from './routes/_authenticated/conversations.$id'
 
-const AuthenticatedRouteRoute = AuthenticatedRouteRouteImport.update({
-  id: '/_authenticated',
-  getParentRoute: () => rootRouteImport,
-} as any)
 const IndexRoute = IndexRouteImport.update({
   id: '/',
   path: '/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ConversationsIndexRoute = ConversationsIndexRouteImport.update({
+  id: '/conversations/',
+  path: '/conversations/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ConversationsIdRoute = ConversationsIdRouteImport.update({
+  id: '/conversations/$id',
+  path: '/conversations/$id',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ApiTranscribeRoute = ApiTranscribeRouteImport.update({
@@ -35,41 +40,28 @@ const ApiSpeakRoute = ApiSpeakRouteImport.update({
   path: '/api/speak',
   getParentRoute: () => rootRouteImport,
 } as any)
-const AuthenticatedConversationsIndexRoute =
-  AuthenticatedConversationsIndexRouteImport.update({
-    id: '/conversations/',
-    path: '/conversations/',
-    getParentRoute: () => AuthenticatedRouteRoute,
-  } as any)
-const AuthenticatedConversationsIdRoute =
-  AuthenticatedConversationsIdRouteImport.update({
-    id: '/conversations/$id',
-    path: '/conversations/$id',
-    getParentRoute: () => AuthenticatedRouteRoute,
-  } as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/api/speak': typeof ApiSpeakRoute
   '/api/transcribe': typeof ApiTranscribeRoute
-  '/conversations/$id': typeof AuthenticatedConversationsIdRoute
-  '/conversations/': typeof AuthenticatedConversationsIndexRoute
+  '/conversations/$id': typeof ConversationsIdRoute
+  '/conversations/': typeof ConversationsIndexRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/api/speak': typeof ApiSpeakRoute
   '/api/transcribe': typeof ApiTranscribeRoute
-  '/conversations/$id': typeof AuthenticatedConversationsIdRoute
-  '/conversations': typeof AuthenticatedConversationsIndexRoute
+  '/conversations/$id': typeof ConversationsIdRoute
+  '/conversations': typeof ConversationsIndexRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
-  '/_authenticated': typeof AuthenticatedRouteRouteWithChildren
   '/api/speak': typeof ApiSpeakRoute
   '/api/transcribe': typeof ApiTranscribeRoute
-  '/_authenticated/conversations/$id': typeof AuthenticatedConversationsIdRoute
-  '/_authenticated/conversations/': typeof AuthenticatedConversationsIndexRoute
+  '/conversations/$id': typeof ConversationsIdRoute
+  '/conversations/': typeof ConversationsIndexRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -89,34 +81,41 @@ export interface FileRouteTypes {
   id:
     | '__root__'
     | '/'
-    | '/_authenticated'
     | '/api/speak'
     | '/api/transcribe'
-    | '/_authenticated/conversations/$id'
-    | '/_authenticated/conversations/'
+    | '/conversations/$id'
+    | '/conversations/'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
-  AuthenticatedRouteRoute: typeof AuthenticatedRouteRouteWithChildren
   ApiSpeakRoute: typeof ApiSpeakRoute
   ApiTranscribeRoute: typeof ApiTranscribeRoute
+  ConversationsIdRoute: typeof ConversationsIdRoute
+  ConversationsIndexRoute: typeof ConversationsIndexRoute
 }
 
 declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
-    '/_authenticated': {
-      id: '/_authenticated'
-      path: ''
-      fullPath: '/'
-      preLoaderRoute: typeof AuthenticatedRouteRouteImport
-      parentRoute: typeof rootRouteImport
-    }
     '/': {
       id: '/'
       path: '/'
       fullPath: '/'
       preLoaderRoute: typeof IndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/conversations/': {
+      id: '/conversations/'
+      path: '/conversations'
+      fullPath: '/conversations/'
+      preLoaderRoute: typeof ConversationsIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/conversations/$id': {
+      id: '/conversations/$id'
+      path: '/conversations/$id'
+      fullPath: '/conversations/$id'
+      preLoaderRoute: typeof ConversationsIdRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/api/transcribe': {
@@ -133,41 +132,15 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiSpeakRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/_authenticated/conversations/': {
-      id: '/_authenticated/conversations/'
-      path: '/conversations'
-      fullPath: '/conversations/'
-      preLoaderRoute: typeof AuthenticatedConversationsIndexRouteImport
-      parentRoute: typeof AuthenticatedRouteRoute
-    }
-    '/_authenticated/conversations/$id': {
-      id: '/_authenticated/conversations/$id'
-      path: '/conversations/$id'
-      fullPath: '/conversations/$id'
-      preLoaderRoute: typeof AuthenticatedConversationsIdRouteImport
-      parentRoute: typeof AuthenticatedRouteRoute
-    }
   }
 }
 
-interface AuthenticatedRouteRouteChildren {
-  AuthenticatedConversationsIdRoute: typeof AuthenticatedConversationsIdRoute
-  AuthenticatedConversationsIndexRoute: typeof AuthenticatedConversationsIndexRoute
-}
-
-const AuthenticatedRouteRouteChildren: AuthenticatedRouteRouteChildren = {
-  AuthenticatedConversationsIdRoute: AuthenticatedConversationsIdRoute,
-  AuthenticatedConversationsIndexRoute: AuthenticatedConversationsIndexRoute,
-}
-
-const AuthenticatedRouteRouteWithChildren =
-  AuthenticatedRouteRoute._addFileChildren(AuthenticatedRouteRouteChildren)
-
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
-  AuthenticatedRouteRoute: AuthenticatedRouteRouteWithChildren,
   ApiSpeakRoute: ApiSpeakRoute,
   ApiTranscribeRoute: ApiTranscribeRoute,
+  ConversationsIdRoute: ConversationsIdRoute,
+  ConversationsIndexRoute: ConversationsIndexRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

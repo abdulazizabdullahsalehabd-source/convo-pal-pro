@@ -1,9 +1,5 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
-import { useEffect, useState } from "react";
-import { supabase } from "@/integrations/supabase/client";
-import { lovable } from "@/integrations/lovable/index";
 import { Button } from "@/components/ui/button";
-import { toast } from "sonner";
 import { MessageCircleHeart, Mic, Sparkles } from "lucide-react";
 
 export const Route = createFileRoute("/")({
@@ -22,42 +18,6 @@ export const Route = createFileRoute("/")({
 
 function Landing() {
   const navigate = useNavigate();
-  const [loading, setLoading] = useState(false);
-  const [checking, setChecking] = useState(true);
-
-  useEffect(() => {
-    supabase.auth.getUser().then(({ data }) => {
-      if (data.user) navigate({ to: "/conversations" });
-      else setChecking(false);
-    });
-  }, [navigate]);
-
-  const signIn = async () => {
-    setLoading(true);
-    try {
-      const result = await lovable.auth.signInWithOAuth("google", {
-        redirect_uri: window.location.origin,
-      });
-      if (result.error) {
-        toast.error("فشل تسجيل الدخول: " + (result.error.message ?? "خطأ غير معروف"));
-        setLoading(false);
-        return;
-      }
-      if (result.redirected) return;
-      navigate({ to: "/conversations" });
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : "خطأ في تسجيل الدخول");
-      setLoading(false);
-    }
-  };
-
-  if (checking) {
-    return (
-      <div className="flex min-h-dvh items-center justify-center bg-gradient-to-b from-sky-50 to-white">
-        <div className="animate-pulse text-slate-500">جاري التحميل...</div>
-      </div>
-    );
-  }
 
   return (
     <div className="min-h-dvh bg-gradient-to-b from-sky-50 via-white to-emerald-50 flex flex-col">
@@ -73,21 +33,20 @@ function Landing() {
         <div className="grid gap-3 w-full max-w-sm mb-10">
           <Feature icon={<Mic className="w-5 h-5" />} title="تحدّث بصوتك" desc="اضغط زر الميكروفون وتحدّث بحرية" />
           <Feature icon={<Sparkles className="w-5 h-5" />} title="تصحيح ذكي" desc="بطاقات مختصرة توضّح الأخطاء والصياغة الأفضل" />
-          <Feature icon={<MessageCircleHeart className="w-5 h-5" />} title="محادثاتك محفوظة" desc="ارجع لأي وقت وأكمل من حيث توقّفت" />
+          <Feature icon={<MessageCircleHeart className="w-5 h-5" />} title="بدون تسجيل دخول" desc="محادثاتك محفوظة في ذاكرة جهازك فقط" />
         </div>
 
         <Button
-          onClick={signIn}
-          disabled={loading}
+          onClick={() => navigate({ to: "/conversations" })}
           size="lg"
           className="w-full max-w-sm h-14 text-base rounded-2xl bg-slate-900 hover:bg-slate-800 shadow-lg"
         >
-          <GoogleIcon />
-          <span className="mr-2">{loading ? "جاري التحويل..." : "الدخول بحساب Google"}</span>
+          <MessageCircleHeart className="w-5 h-5" />
+          <span className="mr-2">ابدأ المحادثة الآن</span>
         </Button>
 
         <p className="text-xs text-slate-400 mt-6 max-w-xs">
-          بتسجيل الدخول توافق على أن تُحفظ محادثاتك في حسابك.
+          لا حاجة لأي حساب — محادثاتك تُحفظ في ذاكرة هذا الجهاز فقط.
         </p>
       </div>
       <footer className="text-center text-xs text-slate-400 py-4">
@@ -106,13 +65,5 @@ function Feature({ icon, title, desc }: { icon: React.ReactNode; title: string; 
         <div className="text-xs text-slate-500 mt-0.5">{desc}</div>
       </div>
     </div>
-  );
-}
-
-function GoogleIcon() {
-  return (
-    <svg viewBox="0 0 24 24" className="w-5 h-5" aria-hidden>
-      <path fill="#EA4335" d="M12 10.2v3.9h5.5c-.24 1.4-1.7 4.1-5.5 4.1-3.3 0-6-2.7-6-6.1s2.7-6.1 6-6.1c1.9 0 3.1.8 3.8 1.5l2.6-2.5C16.8 3.4 14.6 2.5 12 2.5 6.7 2.5 2.5 6.7 2.5 12S6.7 21.5 12 21.5c6.9 0 9.5-4.8 9.5-9.2 0-.6-.1-1.1-.2-1.6H12z"/>
-    </svg>
   );
 }
