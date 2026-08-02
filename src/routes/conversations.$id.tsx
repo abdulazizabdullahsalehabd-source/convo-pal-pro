@@ -4,7 +4,8 @@ import { useServerFn } from "@tanstack/react-start";
 import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { ArrowRight, Mic, Send, Square, Volume2, VolumeX, Sparkles } from "lucide-react";
-import { listMessages, sendMessage } from "@/lib/chat.functions";
+import { replyToMessage } from "@/lib/chat.functions";
+import { appendMessage, listMessages, newId } from "@/lib/local-chat";
 import { useVoiceRecorder, speak, stopSpeaking } from "@/hooks/use-speech";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -36,7 +37,8 @@ function friendlyError(message: string) {
   return message;
 }
 
-export const Route = createFileRoute("/_authenticated/conversations/$id")({
+export const Route = createFileRoute("/conversations/$id")({
+  ssr: false,
   head: () => ({
     meta: [
       { title: "محادثة — صديق المحادثة" },
@@ -63,8 +65,7 @@ type Msg = {
 function ChatScreen() {
   const { id } = Route.useParams();
   const navigate = useNavigate();
-  const listFn = useServerFn(listMessages);
-  const sendFn = useServerFn(sendMessage);
+  const replyFn = useServerFn(replyToMessage);
   const qc = useQueryClient();
   const [text, setText] = useState("");
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -111,17 +112,36 @@ function ChatScreen() {
 
   const { data: messages, isLoading } = useQuery({
     queryKey: ["messages", id],
-    queryFn: () => listFn({ data: { conversationId: id } }) as Promise<Msg[]>,
+    queryFn: async () => listMessages(id) as Msg[],
   });
 
   const sendMut = useMutation({
-    mutationFn: (userText: string) => sendFn({ data: { conversationId: id, userText } }),
+    mutationFn: async (userText: string) => {
+      const history = listMessages(id)
+        .slice(-17)
+        .map((m) => ({ role: m.role, content: m.content }));
+      appendMessage(id, {
+        role: "user",
+        content: userText,
+        language: /[\u0600-\u06FF]/.test(userText) ? "ar" : "en",
+        correction: null,
+      });
+      const out = await replyFn({ data: { userText, history } });
+      appendMessage(id, {
+        role: "assistant",
+        content: out.reply,
+        language: out.reply_language,
+        correction: out.correction,
+      });
+      return out;
+    },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["messages", id] });
       qc.invalidateQueries({ queryKey: ["conversations"] });
     },
     onError: (e: Error, userText) => {
       setText(userText);
+      qc.invalidateQueries({ queryKey: ["messages", id] });
       toast.error(friendlyError(e.message));
     },
   });
@@ -144,7 +164,7 @@ function ChatScreen() {
     qc.setQueryData<Msg[]>(["messages", id], (old) => [
       ...(old ?? []),
       {
-        id: "temp-" + Date.now(),
+        id: "temp-" + newId(),
         role: "user",
         content: t,
         language: /[\u0600-\u06FF]/.test(t) ? "ar" : "en",
