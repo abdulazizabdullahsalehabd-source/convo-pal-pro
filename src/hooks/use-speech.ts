@@ -425,6 +425,10 @@ export async function speak(text: string, lang: "en" | "ar", voice?: string, onE
     if (speakWithBrowser(text, lang, voice, onEnded)) return;
     throw new Error(friendlyAudioError(res.status, msg));
   }
+  // Static hosts (e.g. Vercel) answer /api/speak with HTML — use the browser engine there.
+  if (!(res.headers.get("Content-Type") ?? "").includes("event-stream")) {
+    if (speakWithBrowser(text, lang, voice, onEnded)) return;
+  }
 
   // Gemini-TTS PCM = 24kHz mono s16le.
   const sampleRate = 24000;
