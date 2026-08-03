@@ -1,4 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  hasClientSTT,
+  hasClientTTS,
+  synthesizeDirect,
+  transcribeDirect,
+} from "@/lib/speech-client";
 
 // ---------- Recording (Web Audio PCM → WAV → /api/transcribe) ----------
 
@@ -215,14 +221,27 @@ export function useVoiceRecorder(onTranscript: (text: string, audioUrl?: string)
 
     setStatus("transcribing");
     try {
-      const form = new FormData();
-      form.append("file", blob, "recording.wav");
-      const res = await fetch("/api/transcribe", { method: "POST", body: form });
-      if (!res.ok) {
-        const msg = await res.text().catch(() => "");
-        throw new Error(msg || `HTTP ${res.status}`);
+      let text = "";
+      // 1) Direct from the browser (works on any static host, e.g. Vercel).
+      if (hasClientSTT()) {
+        try {
+          text = await transcribeDirect(blob);
+        } catch {
+          text = "";
+        }
       }
-      const { text } = (await res.json()) as { text?: string };
+      // 2) Fallback: this platform's server route.
+      if (!text) {
+        const form = new FormData();
+        form.append("file", blob, "recording.wav");
+        const res = await fetch("/api/transcribe", { method: "POST", body: form });
+        if (!res.ok) {
+          const msg = await res.text().catch(() => "");
+          throw new Error(msg || `HTTP ${res.status}`);
+        }
+        const json = (await res.json()) as { text?: string };
+        text = (json.text ?? "").trim();
+      }
       const browserText = browserTextRef.current.trim();
       if (text && text.trim()) onTranscript(text.trim(), audioUrl);
       else if (browserText) onTranscript(browserText, audioUrl);
@@ -344,6 +363,50 @@ export async function speak(text: string, lang: "en" | "ar", voice?: string, onE
   const abort = new AbortController();
   currentAbort = abort;
 
+  const AudioCtor: typeof AudioContext | undefined =
+    (window as any).AudioContext || (window as any).webkitAudioContext;
+
+  // 1) Direct provider call from the browser (works on Vercel / any static host).
+  if (hasClientTTS() && AudioCtor) {
+    try {
+      const audio = await synthesizeDirect(text, lang, voice, abort.signal);
+      if (token !== currentPlaybackToken) return;
+      const rate = audio.kind === "pcm" ? audio.sampleRate : 24000;
+      const ctx = new AudioCtor(audio.kind === "pcm" ? { sampleRate: rate } : undefined);
+      currentAudioCtx = ctx;
+      if (ctx.state === "suspended") {
+        try { await ctx.resume(); } catch {}
+      }
+      let buffer: AudioBuffer;
+      if (audio.kind === "pcm") {
+        const usable = audio.bytes.length - (audio.bytes.length % 2);
+        const samples = new Int16Array(audio.bytes.buffer, audio.bytes.byteOffset, usable / 2);
+        const floats = new Float32Array(samples.length);
+        for (let i = 0; i < samples.length; i++) floats[i] = samples[i] / 32768;
+        buffer = ctx.createBuffer(1, floats.length, rate);
+        buffer.copyToChannel(floats, 0);
+      } else {
+        buffer = await ctx.decodeAudioData(audio.bytes.slice().buffer);
+      }
+      const source = ctx.createBufferSource();
+      source.buffer = buffer;
+      source.connect(ctx.destination);
+      source.start();
+      currentDoneTimer = setTimeout(() => {
+        if (token !== currentPlaybackToken) return;
+        try { ctx.close(); } catch {}
+        currentAudioCtx = null;
+        currentAbort = null;
+        currentDoneTimer = null;
+        onEnded?.();
+      }, Math.ceil((buffer.duration + 0.2) * 1000));
+      return;
+    } catch {
+      if (abort.signal.aborted || token !== currentPlaybackToken) return;
+      // fall through to the server route / browser engine
+    }
+  }
+
   let res: Response;
   try {
     res = await fetch("/api/speak", {
@@ -361,6 +424,10 @@ export async function speak(text: string, lang: "en" | "ar", voice?: string, onE
     // Free, unlimited fallback: the browser's built-in speech engine.
     if (speakWithBrowser(text, lang, voice, onEnded)) return;
     throw new Error(friendlyAudioError(res.status, msg));
+  }
+  // Static hosts (e.g. Vercel) answer /api/speak with HTML — use the browser engine there.
+  if (!(res.headers.get("Content-Type") ?? "").includes("event-stream")) {
+    if (speakWithBrowser(text, lang, voice, onEnded)) return;
   }
 
   // Gemini-TTS PCM = 24kHz mono s16le.
