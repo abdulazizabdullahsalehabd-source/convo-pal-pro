@@ -1,4 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  hasClientSTT,
+  hasClientTTS,
+  synthesizeDirect,
+  transcribeDirect,
+} from "@/lib/speech-client";
 
 // ---------- Recording (Web Audio PCM → WAV → /api/transcribe) ----------
 
@@ -215,14 +221,27 @@ export function useVoiceRecorder(onTranscript: (text: string, audioUrl?: string)
 
     setStatus("transcribing");
     try {
-      const form = new FormData();
-      form.append("file", blob, "recording.wav");
-      const res = await fetch("/api/transcribe", { method: "POST", body: form });
-      if (!res.ok) {
-        const msg = await res.text().catch(() => "");
-        throw new Error(msg || `HTTP ${res.status}`);
+      let text = "";
+      // 1) Direct from the browser (works on any static host, e.g. Vercel).
+      if (hasClientSTT()) {
+        try {
+          text = await transcribeDirect(blob);
+        } catch {
+          text = "";
+        }
       }
-      const { text } = (await res.json()) as { text?: string };
+      // 2) Fallback: this platform's server route.
+      if (!text) {
+        const form = new FormData();
+        form.append("file", blob, "recording.wav");
+        const res = await fetch("/api/transcribe", { method: "POST", body: form });
+        if (!res.ok) {
+          const msg = await res.text().catch(() => "");
+          throw new Error(msg || `HTTP ${res.status}`);
+        }
+        const json = (await res.json()) as { text?: string };
+        text = (json.text ?? "").trim();
+      }
       const browserText = browserTextRef.current.trim();
       if (text && text.trim()) onTranscript(text.trim(), audioUrl);
       else if (browserText) onTranscript(browserText, audioUrl);
