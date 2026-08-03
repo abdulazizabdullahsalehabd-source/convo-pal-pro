@@ -363,6 +363,50 @@ export async function speak(text: string, lang: "en" | "ar", voice?: string, onE
   const abort = new AbortController();
   currentAbort = abort;
 
+  const AudioCtor: typeof AudioContext | undefined =
+    (window as any).AudioContext || (window as any).webkitAudioContext;
+
+  // 1) Direct provider call from the browser (works on Vercel / any static host).
+  if (hasClientTTS() && AudioCtor) {
+    try {
+      const audio = await synthesizeDirect(text, lang, voice, abort.signal);
+      if (token !== currentPlaybackToken) return;
+      const rate = audio.kind === "pcm" ? audio.sampleRate : 24000;
+      const ctx = new AudioCtor(audio.kind === "pcm" ? { sampleRate: rate } : undefined);
+      currentAudioCtx = ctx;
+      if (ctx.state === "suspended") {
+        try { await ctx.resume(); } catch {}
+      }
+      let buffer: AudioBuffer;
+      if (audio.kind === "pcm") {
+        const usable = audio.bytes.length - (audio.bytes.length % 2);
+        const samples = new Int16Array(audio.bytes.buffer, audio.bytes.byteOffset, usable / 2);
+        const floats = new Float32Array(samples.length);
+        for (let i = 0; i < samples.length; i++) floats[i] = samples[i] / 32768;
+        buffer = ctx.createBuffer(1, floats.length, rate);
+        buffer.copyToChannel(floats, 0);
+      } else {
+        buffer = await ctx.decodeAudioData(audio.bytes.slice().buffer);
+      }
+      const source = ctx.createBufferSource();
+      source.buffer = buffer;
+      source.connect(ctx.destination);
+      source.start();
+      currentDoneTimer = setTimeout(() => {
+        if (token !== currentPlaybackToken) return;
+        try { ctx.close(); } catch {}
+        currentAudioCtx = null;
+        currentAbort = null;
+        currentDoneTimer = null;
+        onEnded?.();
+      }, Math.ceil((buffer.duration + 0.2) * 1000));
+      return;
+    } catch {
+      if (abort.signal.aborted || token !== currentPlaybackToken) return;
+      // fall through to the server route / browser engine
+    }
+  }
+
   let res: Response;
   try {
     res = await fetch("/api/speak", {
