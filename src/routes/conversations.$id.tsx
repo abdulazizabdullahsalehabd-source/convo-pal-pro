@@ -5,6 +5,7 @@ import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { ArrowRight, Mic, Send, Square, Volume2, VolumeX, Sparkles } from "lucide-react";
 import { replyToMessage } from "@/lib/chat.functions";
+import { generateReplyFromClient } from "@/lib/chat-client";
 import { appendMessage, listMessages, newId } from "@/lib/local-chat";
 import { useVoiceRecorder, speak, stopSpeaking } from "@/hooks/use-speech";
 import { Button } from "@/components/ui/button";
@@ -126,7 +127,11 @@ function ChatScreen() {
         language: /[\u0600-\u06FF]/.test(userText) ? "ar" : "en",
         correction: null,
       });
-      const out = await replyFn({ data: { userText, history } });
+      // Frontend-first: call Groq / OpenRouter directly with fetch when VITE keys exist.
+      let out = await generateReplyFromClient(userText, history).catch(() => null);
+      if (!out) {
+        out = await replyFn({ data: { userText, history } });
+      }
       appendMessage(id, {
         role: "assistant",
         content: out.reply,
