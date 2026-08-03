@@ -119,7 +119,10 @@ export async function generateReplyFromClient(
   if (eps.length === 0) return null;
 
   const userLanguage = detectLanguage(userText);
-  const messages: ChatMsg[] = [...history, { role: "user", content: userText }].slice(-18);
+  const messages: ChatMsg[] = [
+    ...history,
+    { role: "user" as const, content: userText },
+  ].slice(-18);
   let lastErr: unknown = null;
 
   for (const ep of eps) {
