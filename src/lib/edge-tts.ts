@@ -2,8 +2,7 @@
 // No API key, no quota, dozens of natural male/female Arabic + English voices.
 
 const TRUSTED_CLIENT_TOKEN = "6A5AA1D4EAFF4E9FB37E23D68491D6F4";
-const WSS_BASE =
-  "wss://speech.platform.bing.com/consumer/speech/synthesize/readaloud/edge/v1";
+const WSS_BASE = "wss://api.msedgeservices.com/tts/cognitiveservices/websocket/v1";
 const CHROMIUM_VERSION = "130.0.2849.68";
 
 // App voice id -> Edge neural voice per language (kept in the same order as the UI list).
@@ -74,12 +73,12 @@ export async function synthesizeEdge(
   const voice = edgeVoiceFor(voiceId, lang);
   const gec = await secMsGec();
   const url =
-    `${WSS_BASE}?TrustedClientToken=${TRUSTED_CLIENT_TOKEN}` +
-    `&Sec-MS-GEC=${gec}&Sec-MS-GEC-Version=1-${CHROMIUM_VERSION}` +
-    `&ConnectionId=${uuid()}`;
+    `${WSS_BASE}?Ocp-Apim-Subscription-Key=${TRUSTED_CLIENT_TOKEN}` +
+    `&ConnectionId=${uuid()}` +
+    `&Sec-MS-GEC=${gec}&Sec-MS-GEC-Version=1-${CHROMIUM_VERSION}`;
 
   return await new Promise<Uint8Array>((resolve, reject) => {
-    const ws = new WebSocket(url);
+    const ws = new WebSocket(url, "synthesize");
     ws.binaryType = "arraybuffer";
     const chunks: Uint8Array[] = [];
     let settled = false;
