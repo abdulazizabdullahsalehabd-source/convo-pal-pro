@@ -29,132 +29,27 @@ export function edgeVoiceFor(voiceId: string | undefined, lang: "ar" | "en") {
   return entry[lang];
 }
 
-export const hasEdgeTTS = () =>
-  typeof window !== "undefined" &&
-  typeof WebSocket !== "undefined" &&
-  !!window.crypto?.subtle;
+export const hasEdgeTTS = () => typeof window !== "undefined";
 
-async function secMsGec(): Promise<string> {
-  // Windows file-time ticks, rounded down to the nearest 5 minutes.
-  const seconds = Math.floor(Date.now() / 1000) + 11644473600;
-  const ticks = Math.floor(seconds / 300) * 300 * 10000000;
-  const payload = `${ticks}${TRUSTED_CLIENT_TOKEN}`;
-  const digest = await crypto.subtle.digest(
-    "SHA-256",
-    new TextEncoder().encode(payload),
-  );
-  return Array.from(new Uint8Array(digest))
-    .map((b) => b.toString(16).padStart(2, "0"))
-    .join("")
-    .toUpperCase();
-}
-
-function uuid() {
-  return (crypto.randomUUID?.() ?? `${Date.now()}${Math.random()}`).replace(/-/g, "");
-}
-
-function escapeXml(text: string) {
-  return text
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&apos;");
-}
-
-/** Synthesize speech with Edge TTS. Resolves with MP3 bytes. */
+/**
+ * Synthesize speech with Microsoft Edge neural voices (free, no key, no quota).
+ * The service refuses browser Origins, so the request goes through our own
+ * /api/edge-speak route which opens the socket server-side and returns MP3.
+ */
 export async function synthesizeEdge(
   text: string,
   lang: "ar" | "en",
   voiceId: string | undefined,
   signal?: AbortSignal,
 ): Promise<Uint8Array> {
-  if (!hasEdgeTTS()) throw new Error("edge-tts unsupported");
-  const voice = edgeVoiceFor(voiceId, lang);
-  const gec = await secMsGec();
-  const url =
-    `${WSS_BASE}?Ocp-Apim-Subscription-Key=${TRUSTED_CLIENT_TOKEN}` +
-    `&ConnectionId=${uuid()}` +
-    `&Sec-MS-GEC=${gec}&Sec-MS-GEC-Version=1-${CHROMIUM_VERSION}`;
-
-  return await new Promise<Uint8Array>((resolve, reject) => {
-    const ws = new WebSocket(url, "synthesize");
-    ws.binaryType = "arraybuffer";
-    const chunks: Uint8Array[] = [];
-    let settled = false;
-
-    const cleanup = () => {
-      signal?.removeEventListener("abort", onAbort);
-      try { ws.close(); } catch {}
-    };
-    const fail = (message: string) => {
-      if (settled) return;
-      settled = true;
-      cleanup();
-      reject(new Error(message));
-    };
-    const onAbort = () => fail("aborted");
-    signal?.addEventListener("abort", onAbort);
-
-    const timeout = setTimeout(() => fail("edge-tts timeout"), 20000);
-
-    ws.onopen = () => {
-      const now = new Date().toString();
-      ws.send(
-        `X-Timestamp:${now}\r\nContent-Type:application/json; charset=utf-8\r\nPath:speech.config\r\n\r\n` +
-          JSON.stringify({
-            context: {
-              synthesis: {
-                audio: {
-                  metadataoptions: {
-                    sentenceBoundaryEnabled: "false",
-                    wordBoundaryEnabled: "false",
-                  },
-                  outputFormat: "audio-24khz-48kbitrate-mono-mp3",
-                },
-              },
-            },
-          }),
-      );
-      const ssml =
-        `<speak version='1.0' xmlns='http://www.w3.org/2001/10/synthesis' xml:lang='${lang === "ar" ? "ar-SA" : "en-US"}'>` +
-        `<voice name='${voice}'><prosody rate='-4%' pitch='+0Hz'>${escapeXml(text)}</prosody></voice></speak>`;
-      ws.send(
-        `X-RequestId:${uuid()}\r\nContent-Type:application/ssml+xml\r\nX-Timestamp:${now}Z\r\nPath:ssml\r\n\r\n${ssml}`,
-      );
-    };
-
-    ws.onmessage = (event) => {
-      if (typeof event.data === "string") {
-        if (event.data.includes("Path:turn.end")) {
-          if (settled) return;
-          settled = true;
-          clearTimeout(timeout);
-          cleanup();
-          const total = chunks.reduce((n, c) => n + c.length, 0);
-          if (!total) return reject(new Error("edge-tts returned no audio"));
-          const out = new Uint8Array(total);
-          let offset = 0;
-          for (const c of chunks) {
-            out.set(c, offset);
-            offset += c.length;
-          }
-          resolve(out);
-        }
-        return;
-      }
-      const view = new DataView(event.data as ArrayBuffer);
-      const headerLength = view.getUint16(0);
-      chunks.push(new Uint8Array(event.data as ArrayBuffer, 2 + headerLength));
-    };
-
-    ws.onerror = () => {
-      clearTimeout(timeout);
-      fail("edge-tts connection failed");
-    };
-    ws.onclose = () => {
-      clearTimeout(timeout);
-      fail("edge-tts closed early");
-    };
+  const res = await fetch("/api/edge-speak", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ text, lang, voice: voiceId }),
+    signal,
   });
+  if (!res.ok) throw new Error(await res.text().catch(() => "edge-tts failed"));
+  const buf = new Uint8Array(await res.arrayBuffer());
+  if (!buf.length) throw new Error("edge-tts empty audio");
+  return buf;
 }
