@@ -129,7 +129,7 @@ export const Route = createFileRoute("/api/edge-speak")({
           const onError = () => { clearTimeout(timer); finish(false); };
           const onClose = () => { clearTimeout(timer); finish(chunks.length > 0); };
           if (typeof ws.on === "function") {
-            ws.on("message", (data: any) => onMessage(typeof data === "string" ? data : data));
+            ws.on("message", (data: any, isBinary: boolean) => onMessage(isBinary ? data : String(data)));
             ws.on("error", onError);
             ws.on("close", onClose);
           } else {
