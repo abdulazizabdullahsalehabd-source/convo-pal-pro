@@ -35,6 +35,7 @@ export const Route = createFileRoute("/api/edge-speak")({
   server: {
     handlers: {
       POST: async ({ request }) => {
+        try {
         const { text, lang, voice } = (await request.json()) as {
           text?: string;
           lang?: "ar" | "en";
@@ -125,6 +126,12 @@ export const Route = createFileRoute("/api/edge-speak")({
             "X-TTS-Provider": "edge",
           },
         });
+        } catch (e) {
+          return new Response(
+            `edge-tts error: ${e instanceof Error ? e.message : String(e)}`,
+            { status: 502 },
+          );
+        }
       },
     },
   },
