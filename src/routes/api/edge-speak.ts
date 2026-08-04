@@ -50,20 +50,13 @@ export const Route = createFileRoute("/api/edge-speak")({
           `&ConnectionId=${id()}` +
           `&Sec-MS-GEC=${await secMsGec()}&Sec-MS-GEC-Version=1-${CHROMIUM_VERSION}`;
 
-        const upstream = await fetch(url.replace(/^wss:/, "https:"), {
-          headers: {
-            Upgrade: "websocket",
-            "Sec-WebSocket-Protocol": "synthesize",
-            Origin: "chrome-extension://jdiccldimpdaibmpdkjnbmckianbfold",
-            Pragma: "no-cache",
-            "Cache-Control": "no-cache",
-            "User-Agent":
-              "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36 Edg/130.0.0.0",
-          },
+        const ws = new WebSocket(url, "synthesize");
+        ws.binaryType = "arraybuffer";
+        await new Promise<void>((resolve, reject) => {
+          const t = setTimeout(() => reject(new Error("edge-tts timeout")), 15000);
+          ws.addEventListener("open", () => { clearTimeout(t); resolve(); }, { once: true });
+          ws.addEventListener("error", () => { clearTimeout(t); reject(new Error("edge-tts connection failed")); }, { once: true });
         });
-        const ws = (upstream as unknown as { webSocket?: WebSocket }).webSocket;
-        if (!ws) return new Response("edge-tts unavailable", { status: 502 });
-        (ws as unknown as { accept: () => void }).accept();
 
         const audio = await new Promise<Uint8Array | null>((resolve) => {
           const chunks: Uint8Array[] = [];
