@@ -73,30 +73,26 @@ export const Route = createFileRoute("/api/edge-speak")({
           `&ConnectionId=${id()}` +
           `&Sec-MS-GEC=${await secMsGec()}&Sec-MS-GEC-Version=1-${CHROMIUM_VERSION}`;
 
-        let ws: WebSocket;
-        // Worker runtimes open outbound sockets through fetch(); Node/Bun use the ctor.
+        // The service rejects browser Origins, so the socket is opened here.
+        // Worker runtimes upgrade through fetch(); Node uses the ws client.
+        let ws: any = null;
         const upgraded = await fetch(url.replace(/^wss:/, "https:"), {
-          headers: { Upgrade: "websocket", "Sec-WebSocket-Protocol": "synthesize" },
-        }).catch((e) => { console.error("upgrade fetch failed", e); return null; });
-        const socket = (upgraded as unknown as { webSocket?: WebSocket } | null)?.webSocket;
-        if (!socket) {
-          return new Response(
-            "diag: status=" + (upgraded ? upgraded.status : "null") + " hdrs=" + (upgraded ? JSON.stringify(Object.fromEntries(upgraded.headers)) : ""),
-            { status: 599 },
-          );
-        }
+          headers: { Upgrade: "websocket" },
+        }).catch(() => null);
+        const socket = (upgraded as unknown as { webSocket?: any } | null)?.webSocket;
         if (socket) {
-          (socket as unknown as { accept: () => void }).accept();
+          socket.accept();
           ws = socket;
         } else {
-          try { ws = new WebSocket(url, "synthesize"); } catch (e) { throw new Error("ctor:" + (e instanceof Error ? e.message : String(e))); }
-          await new Promise<void>((resolve, reject) => {
+          const { default: WS } = await import("ws");
+          ws = await new Promise((resolve, reject) => {
+            const client: any = new WS(url);
             const t = setTimeout(() => reject(new Error("edge-tts timeout")), 15000);
-            ws.addEventListener("open", () => { clearTimeout(t); resolve(); }, { once: true });
-            ws.addEventListener("error", () => { clearTimeout(t); reject(new Error("ws-open-failed")); }, { once: true });
+            client.on("open", () => { clearTimeout(t); resolve(client); });
+            client.on("error", (e: Error) => { clearTimeout(t); reject(e); });
           });
         }
-        ws.binaryType = "arraybuffer";
+        if (ws.binaryType !== undefined) ws.binaryType = "arraybuffer";
 
         const audio = await new Promise<Uint8Array | null>((resolve) => {
           const chunks: Uint8Array[] = [];
@@ -116,8 +112,7 @@ export const Route = createFileRoute("/api/edge-speak")({
             resolve(out);
           };
           const timer = setTimeout(() => finish(false), 25000);
-          ws.addEventListener("message", (event: MessageEvent) => {
-            const data = event.data;
+          const onMessage = (data: any) => {
             if (typeof data === "string") {
               if (data.includes("Path:turn.end")) {
                 clearTimeout(timer);
@@ -125,12 +120,23 @@ export const Route = createFileRoute("/api/edge-speak")({
               }
               return;
             }
-            const bytes = new Uint8Array(data as ArrayBuffer);
+            const bytes = new Uint8Array(
+              data instanceof ArrayBuffer ? data : (data.buffer ?? data),
+            );
             const headerLength = (bytes[0] << 8) | bytes[1];
-            chunks.push(bytes.subarray(2 + headerLength));
-          });
-          ws.addEventListener("error", () => { clearTimeout(timer); finish(false); });
-          ws.addEventListener("close", () => { clearTimeout(timer); finish(chunks.length > 0); });
+            chunks.push(bytes.slice(2 + headerLength));
+          };
+          const onError = () => { clearTimeout(timer); finish(false); };
+          const onClose = () => { clearTimeout(timer); finish(chunks.length > 0); };
+          if (typeof ws.on === "function") {
+            ws.on("message", (data: any) => onMessage(typeof data === "string" ? data : data));
+            ws.on("error", onError);
+            ws.on("close", onClose);
+          } else {
+            ws.addEventListener("message", (event: MessageEvent) => onMessage(event.data));
+            ws.addEventListener("error", onError);
+            ws.addEventListener("close", onClose);
+          }
 
           const now = new Date().toString();
           ws.send(
