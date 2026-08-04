@@ -4,7 +4,10 @@ import {
   hasClientTTS,
   synthesizeDirect,
   transcribeDirect,
+  cleanForTTS,
+  normalizeArabic,
 } from "@/lib/speech-client";
+import { hasEdgeTTS, synthesizeEdge } from "@/lib/edge-tts";
 
 // ---------- Recording (Web Audio PCM → WAV → /api/transcribe) ----------
 

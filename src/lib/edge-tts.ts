@@ -6,8 +6,6 @@ const WSS_BASE =
   "wss://speech.platform.bing.com/consumer/speech/synthesize/readaloud/edge/v1";
 const CHROMIUM_VERSION = "130.0.2849.68";
 
-type VoicePair = { male?: string; female?: string };
-
 // App voice id -> Edge neural voice per language (kept in the same order as the UI list).
 const VOICE_MAP: Record<string, { ar: string; en: string }> = {
   Kore: { ar: "ar-SA-ZariyahNeural", en: "en-US-AvaNeural" },
