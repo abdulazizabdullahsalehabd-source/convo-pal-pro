@@ -77,17 +77,17 @@ export const Route = createFileRoute("/api/edge-speak")({
         // Worker runtimes open outbound sockets through fetch(); Node/Bun use the ctor.
         const upgraded = await fetch(url.replace(/^wss:/, "https:"), {
           headers: { Upgrade: "websocket", "Sec-WebSocket-Protocol": "synthesize" },
-        }).catch(() => null);
+        }).catch((e) => { console.error("upgrade fetch failed", e); return null; });
         const socket = (upgraded as unknown as { webSocket?: WebSocket } | null)?.webSocket;
         if (socket) {
           (socket as unknown as { accept: () => void }).accept();
           ws = socket;
         } else {
-          ws = new WebSocket(url, "synthesize");
+          try { ws = new WebSocket(url, "synthesize"); } catch (e) { throw new Error("ctor:" + (e instanceof Error ? e.message : String(e))); }
           await new Promise<void>((resolve, reject) => {
             const t = setTimeout(() => reject(new Error("edge-tts timeout")), 15000);
             ws.addEventListener("open", () => { clearTimeout(t); resolve(); }, { once: true });
-            ws.addEventListener("error", () => { clearTimeout(t); reject(new Error("edge-tts connection failed")); }, { once: true });
+            ws.addEventListener("error", () => { clearTimeout(t); reject(new Error("ws-open-failed")); }, { once: true });
           });
         }
         ws.binaryType = "arraybuffer";
