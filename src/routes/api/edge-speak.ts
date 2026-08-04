@@ -1,5 +1,27 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { edgeVoiceFor } from "@/lib/edge-tts";
+
+const VOICE_MAP: Record<string, { ar: string; en: string }> = {
+  Kore: { ar: "ar-SA-ZariyahNeural", en: "en-US-AvaNeural" },
+  Aoede: { ar: "ar-EG-SalmaNeural", en: "en-US-JennyNeural" },
+  Leda: { ar: "ar-AE-FatimaNeural", en: "en-US-AriaNeural" },
+  Callirrhoe: { ar: "ar-KW-NouraNeural", en: "en-US-EmmaNeural" },
+  Autonoe: { ar: "ar-MA-MounaNeural", en: "en-GB-SoniaNeural" },
+  Erinome: { ar: "ar-JO-SanaNeural", en: "en-US-MichelleNeural" },
+  Laomedeia: { ar: "ar-DZ-AminaNeural", en: "en-AU-NatashaNeural" },
+  Puck: { ar: "ar-EG-ShakirNeural", en: "en-US-AndrewNeural" },
+  Charon: { ar: "ar-SA-HamedNeural", en: "en-US-GuyNeural" },
+  Fenrir: { ar: "ar-AE-HamdanNeural", en: "en-US-BrianNeural" },
+  Orus: { ar: "ar-KW-FahedNeural", en: "en-US-ChristopherNeural" },
+  Enceladus: { ar: "ar-IQ-BasselNeural", en: "en-GB-RyanNeural" },
+  Iapetus: { ar: "ar-JO-TaimNeural", en: "en-US-EricNeural" },
+  Algenib: { ar: "ar-QA-MoazNeural", en: "en-US-RogerNeural" },
+  Sadaltager: { ar: "ar-BH-AliNeural", en: "en-US-SteffanNeural" },
+};
+
+function edgeVoiceFor(voiceId: string | undefined, lang: "ar" | "en") {
+  const entry = (voiceId && VOICE_MAP[voiceId]) || VOICE_MAP.Kore;
+  return entry[lang];
+}
 
 const TRUSTED_CLIENT_TOKEN = "6A5AA1D4EAFF4E9FB37E23D68491D6F4";
 const WSS_URL = "wss://api.msedgeservices.com/tts/cognitiveservices/websocket/v1";
