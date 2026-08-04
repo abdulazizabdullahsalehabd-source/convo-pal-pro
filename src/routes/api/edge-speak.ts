@@ -1,0 +1,138 @@
+import { createFileRoute } from "@tanstack/react-router";
+import { edgeVoiceFor } from "@/lib/edge-tts";
+
+const TRUSTED_CLIENT_TOKEN = "6A5AA1D4EAFF4E9FB37E23D68491D6F4";
+const WSS_URL = "wss://api.msedgeservices.com/tts/cognitiveservices/websocket/v1";
+const CHROMIUM_VERSION = "130.0.2849.68";
+
+async function secMsGec() {
+  const seconds = Math.floor(Date.now() / 1000) + 11644473600;
+  const ticks = Math.floor(seconds / 300) * 300 * 10000000;
+  const digest = await crypto.subtle.digest(
+    "SHA-256",
+    new TextEncoder().encode(`${ticks}${TRUSTED_CLIENT_TOKEN}`),
+  );
+  return Array.from(new Uint8Array(digest))
+    .map((b) => b.toString(16).padStart(2, "0"))
+    .join("")
+    .toUpperCase();
+}
+
+const id = () => crypto.randomUUID().replace(/-/g, "");
+
+function escapeXml(text: string) {
+  return text
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&apos;");
+}
+
+// Microsoft Edge read-aloud voices: free, unlimited, no API key.
+// Browsers can't set the required Origin header, so the socket is opened here.
+export const Route = createFileRoute("/api/edge-speak")({
+  server: {
+    handlers: {
+      POST: async ({ request }) => {
+        const { text, lang, voice } = (await request.json()) as {
+          text?: string;
+          lang?: "ar" | "en";
+          voice?: string;
+        };
+        const clean = (text ?? "").trim();
+        if (!clean) return new Response("Empty text", { status: 400 });
+        const language: "ar" | "en" = lang === "ar" ? "ar" : "en";
+        const voiceName = edgeVoiceFor(voice, language);
+
+        const url =
+          `${WSS_URL}?Ocp-Apim-Subscription-Key=${TRUSTED_CLIENT_TOKEN}` +
+          `&ConnectionId=${id()}` +
+          `&Sec-MS-GEC=${await secMsGec()}&Sec-MS-GEC-Version=1-${CHROMIUM_VERSION}`;
+
+        const upstream = await fetch(url.replace(/^wss:/, "https:"), {
+          headers: {
+            Upgrade: "websocket",
+            "Sec-WebSocket-Protocol": "synthesize",
+            Origin: "chrome-extension://jdiccldimpdaibmpdkjnbmckianbfold",
+            Pragma: "no-cache",
+            "Cache-Control": "no-cache",
+            "User-Agent":
+              "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36 Edg/130.0.0.0",
+          },
+        });
+        const ws = (upstream as unknown as { webSocket?: WebSocket }).webSocket;
+        if (!ws) return new Response("edge-tts unavailable", { status: 502 });
+        (ws as unknown as { accept: () => void }).accept();
+
+        const audio = await new Promise<Uint8Array | null>((resolve) => {
+          const chunks: Uint8Array[] = [];
+          let done = false;
+          const finish = (ok: boolean) => {
+            if (done) return;
+            done = true;
+            try { ws.close(); } catch {}
+            if (!ok || !chunks.length) return resolve(null);
+            const total = chunks.reduce((n, c) => n + c.length, 0);
+            const out = new Uint8Array(total);
+            let offset = 0;
+            for (const c of chunks) {
+              out.set(c, offset);
+              offset += c.length;
+            }
+            resolve(out);
+          };
+          const timer = setTimeout(() => finish(false), 25000);
+          ws.addEventListener("message", (event: MessageEvent) => {
+            const data = event.data;
+            if (typeof data === "string") {
+              if (data.includes("Path:turn.end")) {
+                clearTimeout(timer);
+                finish(true);
+              }
+              return;
+            }
+            const bytes = new Uint8Array(data as ArrayBuffer);
+            const headerLength = (bytes[0] << 8) | bytes[1];
+            chunks.push(bytes.subarray(2 + headerLength));
+          });
+          ws.addEventListener("error", () => { clearTimeout(timer); finish(false); });
+          ws.addEventListener("close", () => { clearTimeout(timer); finish(chunks.length > 0); });
+
+          const now = new Date().toString();
+          ws.send(
+            `X-Timestamp:${now}\r\nContent-Type:application/json; charset=utf-8\r\nPath:speech.config\r\n\r\n` +
+              JSON.stringify({
+                context: {
+                  synthesis: {
+                    audio: {
+                      metadataoptions: {
+                        sentenceBoundaryEnabled: "false",
+                        wordBoundaryEnabled: "false",
+                      },
+                      outputFormat: "audio-24khz-48kbitrate-mono-mp3",
+                    },
+                  },
+                },
+              }),
+          );
+          const ssml =
+            `<speak version='1.0' xmlns='http://www.w3.org/2001/10/synthesis' xml:lang='${language === "ar" ? "ar-SA" : "en-US"}'>` +
+            `<voice name='${voiceName}'><prosody rate='-4%' pitch='+0Hz'>${escapeXml(clean)}</prosody></voice></speak>`;
+          ws.send(
+            `X-RequestId:${id()}\r\nContent-Type:application/ssml+xml\r\nX-Timestamp:${now}Z\r\nPath:ssml\r\n\r\n${ssml}`,
+          );
+        });
+
+        if (!audio) return new Response("edge-tts failed", { status: 502 });
+        return new Response(audio as unknown as BodyInit, {
+          headers: {
+            "Content-Type": "audio/mpeg",
+            "Cache-Control": "no-cache",
+            "X-TTS-Provider": "edge",
+          },
+        });
+      },
+    },
+  },
+});
