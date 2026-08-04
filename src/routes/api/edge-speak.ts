@@ -79,6 +79,12 @@ export const Route = createFileRoute("/api/edge-speak")({
           headers: { Upgrade: "websocket", "Sec-WebSocket-Protocol": "synthesize" },
         }).catch((e) => { console.error("upgrade fetch failed", e); return null; });
         const socket = (upgraded as unknown as { webSocket?: WebSocket } | null)?.webSocket;
+        if (!socket) {
+          return new Response(
+            "diag: status=" + (upgraded ? upgraded.status : "null") + " hdrs=" + (upgraded ? JSON.stringify(Object.fromEntries(upgraded.headers)) : ""),
+            { status: 599 },
+          );
+        }
         if (socket) {
           (socket as unknown as { accept: () => void }).accept();
           ws = socket;
